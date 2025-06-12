@@ -57,6 +57,22 @@ services:
       - solr
     restart: unless-stopped
 
+  thumbnail-generator:
+    build:
+      context: ./services/thumbnail-generator
+      dockerfile: Dockerfile
+    container_name: nas-search-thumbnail-generator
+    volumes:
+      - ./test-data:/nas:ro  # Mount test data for testing
+      - thumbnail_data:/app/thumbnails  # Persistent thumbnail storage
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - THUMBNAIL_DIR=/app/thumbnails
+      - THUMBNAIL_QUALITY=85
+    depends_on:
+      - redis
+    restart: unless-stopped
+
   search-api:
     build:
       context: ./services/search-api
@@ -64,10 +80,15 @@ services:
     container_name: nas-search-api
     ports:
       - "8080:8080"
+    volumes:
+      - thumbnail_data:/app/thumbnails  # Access to thumbnail storage
     environment:
       - SOLR_URL=http://solr:8983/solr/nas_content
+      - REDIS_URL=redis://redis:6379
+      - THUMBNAIL_DIR=/app/thumbnails
     depends_on:
       - solr
+      - redis
     restart: unless-stopped
 
   web-frontend:
@@ -86,6 +107,7 @@ services:
 volumes:
   solr_data:
   redis_data:
+  thumbnail_data:
 
 networks:
   default:

@@ -1,0 +1,5 @@
+redis==5.0.1
+pillow==10.1.0
+python-dotenv==1.0.0
+structlog==23.2.0
+python-magic==0.4.27

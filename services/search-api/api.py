@@ -6,11 +6,14 @@ Search API Service - REST API for querying the NAS search index
 import os
 from typing import Dict, List, Optional, Any
 from urllib.parse import urlencode
+from pathlib import Path
 
 import requests
 import structlog
+import redis
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 # Configure structured logging
@@ -36,6 +39,11 @@ logger = structlog.get_logger()
 
 # Configuration
 SOLR_URL = os.getenv('SOLR_URL', 'http://localhost:8983/solr/nas_content')
+REDIS_URL = os.getenv('REDIS_URL', 'redis://localhost:6379')
+THUMBNAIL_DIR = os.getenv('THUMBNAIL_DIR', '/app/thumbnails')
+
+# Initialize Redis connection
+redis_client = redis.from_url(REDIS_URL, decode_responses=True)
 
 app = FastAPI(
     title="NAS Search API",
@@ -357,6 +365,36 @@ async def suggest(
         logger.error("Suggestion request failed", error=str(e))
         raise HTTPException(status_code=500, detail="Failed to get suggestions")
 
+@app.get("/thumbnail")
+async def get_thumbnail(file_path: str = Query(..., description="Full file path"), size: str = Query(..., description="Thumbnail size")):
+    """Get thumbnail for a file"""
+    try:
+        if size not in ['small', 'medium', 'large']:
+            raise HTTPException(status_code=400, detail="Invalid thumbnail size")
+        
+        # Get thumbnail path from Redis
+        thumbnail_key = f"thumbnails:{file_path}"
+        thumbnail_path = redis_client.hget(thumbnail_key, size)
+        
+        if not thumbnail_path:
+            raise HTTPException(status_code=404, detail="Thumbnail not found")
+        
+        thumbnail_file = Path(thumbnail_path)
+        if not thumbnail_file.exists():
+            raise HTTPException(status_code=404, detail="Thumbnail file not found")
+        
+        return FileResponse(
+            thumbnail_file,
+            media_type="image/jpeg",
+            headers={"Cache-Control": "public, max-age=86400"}  # Cache for 1 day
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Failed to serve thumbnail", file_path=file_path, size=size, error=str(e))
+        raise HTTPException(status_code=500, detail="Failed to serve thumbnail")
+
 @app.get("/health")
 async def health_check():
     """Health check endpoint"""
@@ -365,15 +403,26 @@ async def health_check():
         response = requests.get(f"{SOLR_URL}/admin/ping", timeout=5)
         solr_healthy = response.status_code == 200
         
+        # Check Redis connection
+        try:
+            redis_client.ping()
+            redis_healthy = True
+        except Exception:
+            redis_healthy = False
+        
+        overall_healthy = solr_healthy and redis_healthy
+        
         return {
-            "status": "healthy" if solr_healthy else "degraded",
+            "status": "healthy" if overall_healthy else "degraded",
             "solr": "healthy" if solr_healthy else "unhealthy",
+            "redis": "healthy" if redis_healthy else "unhealthy",
             "timestamp": "2023-12-06T12:00:00Z"
         }
     except Exception:
         return {
             "status": "unhealthy",
             "solr": "unreachable",
+            "redis": "unreachable",
             "timestamp": "2023-12-06T12:00:00Z"
         }
 

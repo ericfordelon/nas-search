@@ -55,6 +55,7 @@
   <field name="height" type="long" indexed="true" stored="true"/>
   <field name="orientation" type="string" indexed="true" stored="true"/>
   <field name="color_space" type="string" indexed="true" stored="true"/>
+  <field name="format" type="string" indexed="true" stored="true"/>
   <field name="gps_location" type="location" indexed="true" stored="true"/>
   <field name="gps_altitude" type="double" indexed="true" stored="true"/>
 

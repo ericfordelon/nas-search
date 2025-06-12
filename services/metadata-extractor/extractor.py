@@ -267,6 +267,7 @@ class MetadataExtractorService:
         self.redis_url = os.getenv('REDIS_URL', 'redis://localhost:6379')
         self.solr_url = os.getenv('SOLR_URL', 'http://localhost:8983/solr/nas_content')
         self.processing_queue = 'file_processing_queue'
+        self.thumbnail_queue = 'thumbnail_generation_queue'
         self.redis_client = None
         self.extractor = None
         
@@ -322,6 +323,10 @@ class MetadataExtractorService:
                 # Mark as processed
                 self.redis_client.sadd('processed_files', str(file_path))
                 self.redis_client.srem('queued_files', str(file_path))
+                
+                # Trigger thumbnail generation for supported files
+                self.trigger_thumbnail_generation(message)
+                
                 logger.info("File processed successfully", file_path=str(file_path))
             
             return success
@@ -333,8 +338,8 @@ class MetadataExtractorService:
     def index_in_solr(self, document: Dict[str, Any]) -> bool:
         """Index document in Solr"""
         try:
-            # Fields that should not be sent to Solr
-            excluded_fields = {'event_type', 'queued_at'}
+            # Fields that should not be sent to Solr (not in our schema)
+            excluded_fields = {'event_type', 'queued_at', 'format'}
             
             # Clean up document for Solr
             solr_doc = {k: v for k, v in document.items() 
@@ -359,6 +364,23 @@ class MetadataExtractorService:
         except Exception as e:
             logger.error("Solr indexing error", error=str(e))
             return False
+    
+    def trigger_thumbnail_generation(self, message: Dict[str, Any]):
+        """Trigger thumbnail generation for supported files"""
+        try:
+            # Check if file type supports thumbnails
+            file_extension = message.get('file_extension', '').lower()
+            image_formats = {'.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.tif', '.webp'}
+            video_formats = {'.mp4', '.avi', '.mkv', '.mov', '.wmv', '.flv', '.webm', '.m4v', '.mpg', '.mpeg'}
+            
+            if file_extension in image_formats or file_extension in video_formats:
+                # Send message to thumbnail generation queue
+                self.redis_client.lpush(self.thumbnail_queue, json.dumps(message))
+                logger.info("Triggered thumbnail generation", 
+                          file_path=message.get('file_path'),
+                          file_type=file_extension)
+        except Exception as e:
+            logger.error("Failed to trigger thumbnail generation", error=str(e))
     
     def delete_from_solr(self, file_path: Path) -> bool:
         """Delete document from Solr"""
