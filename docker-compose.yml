@@ -1,0 +1,92 @@
+version: '3.8'
+
+services:
+  solr:
+    image: solr:9.4
+    container_name: nas-search-solr
+    ports:
+      - "8983:8983"
+    volumes:
+      - ./solr/configsets:/opt/solr/server/solr/configsets
+      - solr_data:/var/solr
+    environment:
+      - SOLR_HEAP=2g
+    command: >
+      bash -c "
+        solr-precreate nas_content /opt/solr/server/solr/configsets/nas_content &&
+        exec solr -f
+      "
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: nas-search-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    restart: unless-stopped
+
+  file-monitor:
+    build:
+      context: ./services/file-monitor
+      dockerfile: Dockerfile
+    container_name: nas-search-file-monitor
+    volumes:
+      - ./test-data:/nas:ro  # Mount test data for testing
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - NAS_PATH=/nas
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+  metadata-extractor:
+    build:
+      context: ./services/metadata-extractor
+      dockerfile: Dockerfile
+    container_name: nas-search-metadata-extractor
+    volumes:
+      - ./test-data:/nas:ro  # Mount test data for testing
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - SOLR_URL=http://solr:8983/solr/nas_content
+    depends_on:
+      - redis
+      - solr
+    restart: unless-stopped
+
+  search-api:
+    build:
+      context: ./services/search-api
+      dockerfile: Dockerfile
+    container_name: nas-search-api
+    ports:
+      - "8080:8080"
+    environment:
+      - SOLR_URL=http://solr:8983/solr/nas_content
+    depends_on:
+      - solr
+    restart: unless-stopped
+
+  web-frontend:
+    build:
+      context: ./services/web-frontend
+      dockerfile: Dockerfile
+    container_name: nas-search-frontend
+    ports:
+      - "3000:3000"
+    environment:
+      - REACT_APP_API_URL=http://localhost:8080
+    depends_on:
+      - search-api
+    restart: unless-stopped
+
+volumes:
+  solr_data:
+  redis_data:
+
+networks:
+  default:
+    name: nas-search-network

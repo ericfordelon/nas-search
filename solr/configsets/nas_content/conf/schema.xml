@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<schema name="nas_content" version="1.6">
+
+  <!-- Common field types -->
+  <fieldType name="string" class="solr.StrField" sortMissingLast="true" omitNorms="true"/>
+  <fieldType name="text_general" class="solr.TextField" positionIncrementGap="100">
+    <analyzer type="index">
+      <tokenizer class="solr.StandardTokenizerFactory"/>
+      <filter class="solr.StopFilterFactory" ignoreCase="true" words="stopwords.txt"/>
+      <filter class="solr.LowerCaseFilterFactory"/>
+    </analyzer>
+    <analyzer type="query">
+      <tokenizer class="solr.StandardTokenizerFactory"/>
+      <filter class="solr.StopFilterFactory" ignoreCase="true" words="stopwords.txt"/>
+      <filter class="solr.SynonymGraphFilterFactory" synonyms="synonyms.txt" ignoreCase="true" expand="true"/>
+      <filter class="solr.LowerCaseFilterFactory"/>
+    </analyzer>
+  </fieldType>
+  <fieldType name="long" class="solr.LongPointField" omitNorms="true"/>
+  <fieldType name="double" class="solr.DoublePointField" omitNorms="true"/>
+  <fieldType name="date" class="solr.DatePointField" omitNorms="true"/>
+  <fieldType name="boolean" class="solr.BoolField" sortMissingLast="true" omitNorms="true"/>
+  <fieldType name="location" class="solr.LatLonPointSpatialField" docValues="true"/>
+
+  <!-- Required fields -->
+  <field name="id" type="string" indexed="true" stored="true" required="true" multiValued="false"/>
+  <field name="_version_" type="long" indexed="true" stored="true" docValues="true"/>
+
+  <!-- Common file fields -->
+  <field name="file_path" type="string" indexed="true" stored="true" required="true"/>
+  <field name="file_name" type="string" indexed="true" stored="true"/>
+  <field name="file_type" type="string" indexed="true" stored="true"/>
+  <field name="file_extension" type="string" indexed="true" stored="true"/>
+  <field name="file_size" type="long" indexed="true" stored="true"/>
+  <field name="content_hash" type="string" indexed="true" stored="true"/>
+  <field name="created_date" type="date" indexed="true" stored="true"/>
+  <field name="modified_date" type="date" indexed="true" stored="true"/>
+  <field name="indexed_date" type="date" indexed="true" stored="true" default="NOW"/>
+
+  <!-- Content fields -->
+  <field name="title" type="text_general" indexed="true" stored="true"/>
+  <field name="content" type="text_general" indexed="true" stored="true"/>
+  <field name="content_type" type="string" indexed="true" stored="true"/>
+
+  <!-- Image fields -->
+  <field name="camera_make" type="string" indexed="true" stored="true"/>
+  <field name="camera_model" type="string" indexed="true" stored="true"/>
+  <field name="lens_model" type="string" indexed="true" stored="true"/>
+  <field name="focal_length" type="double" indexed="true" stored="true"/>
+  <field name="aperture" type="double" indexed="true" stored="true"/>
+  <field name="iso_speed" type="long" indexed="true" stored="true"/>
+  <field name="shutter_speed" type="string" indexed="true" stored="true"/>
+  <field name="flash" type="boolean" indexed="true" stored="true"/>
+  <field name="width" type="long" indexed="true" stored="true"/>
+  <field name="height" type="long" indexed="true" stored="true"/>
+  <field name="orientation" type="string" indexed="true" stored="true"/>
+  <field name="color_space" type="string" indexed="true" stored="true"/>
+  <field name="gps_location" type="location" indexed="true" stored="true"/>
+  <field name="gps_altitude" type="double" indexed="true" stored="true"/>
+
+  <!-- Video fields -->
+  <field name="duration" type="long" indexed="true" stored="true"/>
+  <field name="video_codec" type="string" indexed="true" stored="true"/>
+  <field name="audio_codec" type="string" indexed="true" stored="true"/>
+  <field name="frame_rate" type="double" indexed="true" stored="true"/>
+  <field name="bit_rate" type="long" indexed="true" stored="true"/>
+  <field name="resolution" type="string" indexed="true" stored="true"/>
+
+  <!-- Document fields -->
+  <field name="author" type="string" indexed="true" stored="true"/>
+  <field name="creator" type="string" indexed="true" stored="true"/>
+  <field name="subject" type="text_general" indexed="true" stored="true"/>
+  <field name="keywords" type="text_general" indexed="true" stored="true" multiValued="true"/>
+  <field name="page_count" type="long" indexed="true" stored="true"/>
+  <field name="language" type="string" indexed="true" stored="true"/>
+
+  <!-- Audio fields -->
+  <field name="artist" type="string" indexed="true" stored="true"/>
+  <field name="album" type="string" indexed="true" stored="true"/>
+  <field name="genre" type="string" indexed="true" stored="true"/>
+  <field name="track_number" type="long" indexed="true" stored="true"/>
+  <field name="year" type="long" indexed="true" stored="true"/>
+
+  <!-- Thumbnail fields -->
+  <field name="thumbnail_small" type="string" indexed="false" stored="true"/>
+  <field name="thumbnail_medium" type="string" indexed="false" stored="true"/>
+  <field name="thumbnail_large" type="string" indexed="false" stored="true"/>
+
+  <!-- Directory structure -->
+  <field name="directory_path" type="string" indexed="true" stored="true"/>
+  <field name="directory_depth" type="long" indexed="true" stored="true"/>
+
+  <!-- Processing status -->
+  <field name="processing_status" type="string" indexed="true" stored="true"/>
+  <field name="processing_error" type="text_general" indexed="true" stored="true"/>
+
+  <!-- Copy fields for search -->
+  <copyField source="file_name" dest="content"/>
+  <copyField source="title" dest="content"/>
+  <copyField source="author" dest="content"/>
+  <copyField source="artist" dest="content"/>
+  <copyField source="album" dest="content"/>
+  <copyField source="subject" dest="content"/>
+  <copyField source="keywords" dest="content"/>
+
+  <!-- Dynamic fields for custom metadata -->
+  <dynamicField name="*_s" type="string" indexed="true" stored="true"/>
+  <dynamicField name="*_i" type="long" indexed="true" stored="true"/>
+  <dynamicField name="*_d" type="double" indexed="true" stored="true"/>
+  <dynamicField name="*_dt" type="date" indexed="true" stored="true"/>
+  <dynamicField name="*_b" type="boolean" indexed="true" stored="true"/>
+  <dynamicField name="*_txt" type="text_general" indexed="true" stored="true"/>
+
+</schema>

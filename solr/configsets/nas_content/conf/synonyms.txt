@@ -1,0 +1,14 @@
+# Synonym mappings for better search results
+# Format: word1,word2,word3 => synonym1,synonym2
+photo,image,picture,pic
+video,movie,film,clip
+document,doc,file
+music,audio,song,track
+jpeg,jpg
+tiff,tif
+mpeg,mpg
+photo => photograph,photography
+camera => cam
+resolution => res
+metadata => meta
+thumbnail => thumb
