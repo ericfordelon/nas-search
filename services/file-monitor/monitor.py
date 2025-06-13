@@ -116,56 +116,89 @@ class NASFileHandler(FileSystemEventHandler):
         try:
             file_str = str(file_path)
             
-            # Use Redis to atomically check and prevent duplicate queuing
-            queue_key = f"queue_lock:{file_str}"
+            # First check: Global processing lock per file path (longer duration)
+            global_lock_key = f"global_processing:{file_str}"
             
-            # Try to acquire a processing lock (expires in 5 minutes)
-            if not self.redis_client.set(queue_key, "processing", nx=True, ex=300):
-                logger.debug("File already queued or processing", file_path=file_str)
+            # Try to acquire a global processing lock (expires in 30 minutes)
+            if not self.redis_client.set(global_lock_key, "processing", nx=True, ex=1800):
+                logger.debug("File globally locked for processing", file_path=file_str)
                 return
             
             try:
-                # Skip if already in queue
+                # Second check: Skip if already in queue
                 if self.redis_client.sismember('queued_files', file_str):
                     logger.debug("File already in queue", file_path=file_str)
                     return
                 
-                # Skip if recently processed (for created/modified events)
+                # Third check: Skip if recently processed (for created/modified events)
                 if event_type in ['created', 'modified']:
                     processed_key = f"processed:{file_str}"
                     last_processed = self.redis_client.get(processed_key)
                     if last_processed:
-                        # Check if file was processed recently (within last hour)
+                        # Check if file was processed recently (within last 2 hours)
                         try:
                             last_time = float(last_processed)
-                            if time.time() - last_time < 3600:  # 1 hour
+                            if time.time() - last_time < 7200:  # 2 hours
                                 logger.debug("File processed recently, skipping", file_path=file_str)
                                 return
                         except (ValueError, TypeError):
                             pass
                 
-                message = self._create_file_message(file_path, event_type)
-                if not message:
+                # Fourth check: Use file content hash to detect identical files
+                if event_type in ['created', 'modified'] and file_path.exists():
+                    file_hash = self._get_file_hash(file_path)
+                    if file_hash:
+                        hash_key = f"file_hash:{file_hash}"
+                        existing_path = self.redis_client.get(hash_key)
+                        if existing_path and existing_path.decode('utf-8') != file_str:
+                            logger.debug("File with identical content already exists", 
+                                       file_path=file_str, 
+                                       existing_path=existing_path.decode('utf-8'))
+                            return
+                        # Store this file's hash
+                        self.redis_client.set(hash_key, file_str, ex=86400)  # 24 hours
+                
+                # Use shorter-term queue lock for atomic queue operations
+                queue_key = f"queue_lock:{file_str}"
+                if not self.redis_client.set(queue_key, "queuing", nx=True, ex=60):
+                    logger.debug("File being queued by another process", file_path=file_str)
                     return
                 
-                # Add to Redis queue
-                self.redis_client.lpush(self.processing_queue, json.dumps(message))
-                
-                # Mark as queued
-                if event_type != 'deleted':
-                    self.redis_client.sadd('queued_files', file_str)
-                
-                logger.info("File queued for processing", 
-                           file_path=file_str, 
-                           event_type=event_type,
-                           file_size=message.get('file_size', 0))
-                           
+                try:
+                    message = self._create_file_message(file_path, event_type)
+                    if not message:
+                        return
+                    
+                    # Add to Redis queue
+                    self.redis_client.lpush(self.processing_queue, json.dumps(message))
+                    
+                    # Mark as queued
+                    if event_type != 'deleted':
+                        self.redis_client.sadd('queued_files', file_str)
+                    
+                    logger.info("File queued for processing", 
+                               file_path=file_str, 
+                               event_type=event_type,
+                               file_size=message.get('file_size', 0),
+                               content_hash=message.get('content_hash', 'none'))
+                               
+                finally:
+                    # Release the queue lock
+                    self.redis_client.delete(queue_key)
+                    
             finally:
-                # Release the lock
-                self.redis_client.delete(queue_key)
+                # Keep the global lock until processing is complete
+                # The metadata extractor will release it
+                pass
             
         except Exception as e:
             logger.error("Failed to queue file", file_path=str(file_path), error=str(e))
+            # Clean up locks on error
+            try:
+                self.redis_client.delete(f"global_processing:{file_str}")
+                self.redis_client.delete(f"queue_lock:{file_str}")
+            except:
+                pass
     
     def on_created(self, event: FileSystemEvent):
         """Handle file creation events"""

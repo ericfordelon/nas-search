@@ -339,8 +339,11 @@ class MetadataExtractorService:
             
             if event_type == 'deleted':
                 # Remove from Solr index
-                self.delete_from_solr(file_path)
-                return True
+                success = self.delete_from_solr(file_path)
+                # Release the global processing lock
+                global_lock_key = f"global_processing:{str(file_path)}"
+                self.redis_client.delete(global_lock_key)
+                return success
             
             if not file_path.exists():
                 logger.warning("File no longer exists", file_path=str(file_path))
@@ -371,15 +374,31 @@ class MetadataExtractorService:
                 self.redis_client.sadd('processed_files', str(file_path))
                 self.redis_client.srem('queued_files', str(file_path))
                 
+                # Release the global processing lock
+                global_lock_key = f"global_processing:{str(file_path)}"
+                self.redis_client.delete(global_lock_key)
+                
                 # Trigger thumbnail generation for supported files
                 self.trigger_thumbnail_generation(message)
                 
                 logger.info("File processed successfully", file_path=str(file_path))
+            else:
+                # Release the global processing lock even on failure
+                global_lock_key = f"global_processing:{str(file_path)}"
+                self.redis_client.delete(global_lock_key)
             
             return success
             
         except Exception as e:
             logger.error("Failed to process file", message=message, error=str(e))
+            # Release the global processing lock on exception
+            try:
+                file_path = message.get('file_path')
+                if file_path:
+                    global_lock_key = f"global_processing:{file_path}"
+                    self.redis_client.delete(global_lock_key)
+            except:
+                pass
             return False
     
     def check_if_update_needed(self, document: Dict[str, Any]) -> bool:
