@@ -9,6 +9,7 @@ import json
 import hashlib
 from pathlib import Path
 from typing import Set, Dict, Any
+import threading
 from datetime import datetime
 
 import redis
@@ -59,6 +60,11 @@ class NASFileHandler(FileSystemEventHandler):
         self.nas_path = Path(nas_path)
         self.processing_queue = 'file_processing_queue'
         self.processed_files: Set[str] = set()
+        
+        # Event debouncing: track recent events to prevent duplicates
+        self.pending_events: Dict[str, Dict] = {}  # file_path -> event_data
+        self.debounce_delay = 5.0  # seconds to wait before processing events
+        self.debounce_lock = threading.Lock()
         
         # Load processed files from Redis on startup
         self._load_processed_files()
@@ -200,6 +206,59 @@ class NASFileHandler(FileSystemEventHandler):
             except:
                 pass
     
+    def _schedule_debounced_event(self, file_path: Path, event_type: str):
+        """Schedule an event to be processed after debounce delay"""
+        file_str = str(file_path)
+        
+        with self.debounce_lock:
+            # Update or create pending event
+            self.pending_events[file_str] = {
+                'file_path': file_path,
+                'event_type': event_type,
+                'timestamp': time.time()
+            }
+            
+            # Schedule processing after delay
+            timer = threading.Timer(self.debounce_delay, self._process_debounced_event, [file_str])
+            timer.start()
+            
+            logger.debug("Scheduled debounced event", 
+                        file_path=file_str, 
+                        event_type=event_type,
+                        delay=self.debounce_delay)
+    
+    def _process_debounced_event(self, file_str: str):
+        """Process a debounced event after delay has passed"""
+        with self.debounce_lock:
+            if file_str not in self.pending_events:
+                # Event was cancelled or already processed
+                return
+            
+            event_data = self.pending_events.pop(file_str)
+            
+        # Check if file still exists (for created/modified events)
+        file_path = event_data['file_path']
+        event_type = event_data['event_type']
+        
+        if event_type in ['created', 'modified']:
+            if not file_path.exists():
+                logger.debug("File no longer exists, skipping debounced event", file_path=file_str)
+                return
+                
+        # Check if this is the most recent event for this file
+        event_time = event_data['timestamp']
+        if time.time() - event_time > self.debounce_delay * 2:
+            logger.debug("Event too old, skipping", file_path=file_str)
+            return
+            
+        logger.info("Processing debounced event", 
+                   file_path=file_str, 
+                   event_type=event_type,
+                   age=time.time() - event_time)
+        
+        # Process the event
+        self._queue_file_for_processing(file_path, event_type)
+    
     def on_created(self, event: FileSystemEvent):
         """Handle file creation events"""
         if event.is_directory:
@@ -207,10 +266,8 @@ class NASFileHandler(FileSystemEventHandler):
         
         file_path = Path(event.src_path)
         if self._is_supported_file(file_path):
-            # Wait a bit to ensure file is fully written
-            time.sleep(1)
-            if file_path.exists():
-                self._queue_file_for_processing(file_path, 'created')
+            # Use debouncing to prevent duplicate events
+            self._schedule_debounced_event(file_path, 'created')
     
     def on_modified(self, event: FileSystemEvent):
         """Handle file modification events"""
@@ -222,7 +279,8 @@ class NASFileHandler(FileSystemEventHandler):
             # Wait a bit to ensure file is fully written
             time.sleep(1)
             if file_path.exists():
-                self._queue_file_for_processing(file_path, 'modified')
+                # Use debouncing to prevent duplicate events
+                self._schedule_debounced_event(file_path, 'modified')
     
     def on_deleted(self, event: FileSystemEvent):
         """Handle file deletion events"""
@@ -231,8 +289,9 @@ class NASFileHandler(FileSystemEventHandler):
         
         file_path = Path(event.src_path)
         if self._is_supported_file(file_path):
-            self._queue_file_for_processing(file_path, 'deleted')
-            # Remove from processed files
+            # Use debouncing to prevent duplicate events
+            self._schedule_debounced_event(file_path, 'deleted')
+            # Remove from processed files immediately (no need to debounce cleanup)
             self.redis_client.srem('processed_files', str(file_path))
             self.redis_client.srem('queued_files', str(file_path))
     
@@ -247,9 +306,11 @@ class NASFileHandler(FileSystemEventHandler):
         if self._is_supported_file(old_path) or self._is_supported_file(new_path):
             # Handle as deletion of old path and creation of new path
             if self._is_supported_file(old_path):
-                self._queue_file_for_processing(old_path, 'deleted')
+                # Use debouncing to prevent duplicate events
+                self._schedule_debounced_event(old_path, 'deleted')
             if self._is_supported_file(new_path) and new_path.exists():
-                self._queue_file_for_processing(new_path, 'created')
+                # Use debouncing to prevent duplicate events
+                self._schedule_debounced_event(new_path, 'created')
 
 
 class FileMonitorService:

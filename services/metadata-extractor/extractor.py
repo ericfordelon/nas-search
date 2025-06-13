@@ -354,7 +354,17 @@ class MetadataExtractorService:
             
             # Combine with file message data
             document = {**message, **metadata}
-            document['id'] = str(file_path)  # Use file path as unique ID
+            
+            # Create deterministic document ID: hash of file_path + content_hash + file_size
+            # This ensures absolute uniqueness and prevents any duplicates at Solr level
+            import hashlib
+            id_components = [
+                str(file_path),
+                str(document.get('content_hash', '')),
+                str(document.get('file_size', 0))
+            ]
+            deterministic_id = hashlib.sha256('|'.join(id_components).encode()).hexdigest()
+            document['id'] = deterministic_id
             document['processing_status'] = 'completed'
             
             # Fix date formats for Solr (ISO format with Z suffix)
@@ -407,16 +417,17 @@ class MetadataExtractorService:
             file_path = document.get('file_path')
             content_hash = document.get('content_hash')
             modified_date = document.get('modified_date')
+            file_size = document.get('file_size')
             
             if not file_path:
                 return True
             
-            # Query existing document from Solr
+            # Query existing document from Solr by file_path (since we now use deterministic IDs)
             response = requests.get(
                 f"{self.solr_url}/select",
                 params={
-                    'q': f'id:"{file_path}"',
-                    'fl': 'content_hash,modified_date',
+                    'q': f'file_path:"{file_path}"',
+                    'fl': 'content_hash,modified_date,file_size',
                     'wt': 'json'
                 }
             )
@@ -428,26 +439,43 @@ class MetadataExtractorService:
             data = response.json()
             if data['response']['numFound'] == 0:
                 # Document doesn't exist, needs indexing
+                logger.info("Document not found in Solr, needs indexing", file_path=file_path)
+                return True
+            
+            if data['response']['numFound'] > 1:
+                # Multiple documents found - this shouldn't happen with deterministic IDs
+                logger.warning("Multiple documents found for file_path, will reindex", 
+                             file_path=file_path, count=data['response']['numFound'])
                 return True
             
             existing_doc = data['response']['docs'][0]
             existing_hash = existing_doc.get('content_hash')
             existing_modified = existing_doc.get('modified_date')
+            existing_size = existing_doc.get('file_size')
             
-            # Skip if content hash matches (file hasn't changed)
-            if content_hash and existing_hash == content_hash:
-                logger.info("Skipping indexing - content unchanged", 
-                           file_path=file_path, hash=content_hash)
+            # Skip if content hash AND file size match (file hasn't changed)
+            if (content_hash and existing_hash == content_hash and 
+                file_size and existing_size == file_size):
+                logger.info("Skipping indexing - content and size unchanged", 
+                           file_path=file_path, 
+                           hash=content_hash[:16] + "...",
+                           size=file_size)
                 return False
             
-            # Skip if modification date is the same or older
-            if modified_date and existing_modified and modified_date <= existing_modified:
-                logger.info("Skipping indexing - file not newer", 
+            # Skip if modification date is the same or older AND size matches
+            if (modified_date and existing_modified and modified_date <= existing_modified and
+                file_size and existing_size == file_size):
+                logger.info("Skipping indexing - file not newer and size unchanged", 
                            file_path=file_path, 
                            existing_modified=existing_modified,
                            new_modified=modified_date)
                 return False
             
+            logger.info("Document needs updating", 
+                       file_path=file_path,
+                       hash_changed=existing_hash != content_hash,
+                       size_changed=existing_size != file_size,
+                       date_newer=modified_date > existing_modified if existing_modified else True)
             return True
             
         except Exception as e:
@@ -507,14 +535,15 @@ class MetadataExtractorService:
             logger.error("Failed to trigger thumbnail generation", error=str(e))
     
     def delete_from_solr(self, file_path: Path) -> bool:
-        """Delete document from Solr"""
+        """Delete document from Solr using file_path query"""
         try:
-            delete_query = {"delete": {"id": str(file_path)}}
+            # Since we now use deterministic IDs, we need to delete by file_path query
+            delete_query = f'file_path:"{str(file_path)}"'
             
             response = requests.post(
                 f"{self.solr_url}/update?commit=true",
-                json=delete_query,
-                headers={'Content-Type': 'application/json'}
+                data=f'<delete><query>{delete_query}</query></delete>',
+                headers={'Content-Type': 'text/xml'}
             )
             
             if response.status_code == 200:
