@@ -7,6 +7,7 @@ import { usePathname } from 'next/navigation';
 import SearchIcon from '@mui/icons-material/Search';
 import PhotoLibraryIcon from '@mui/icons-material/PhotoLibrary';
 import BarChartIcon from '@mui/icons-material/BarChart';
+import AdminPanelSettingsIcon from '@mui/icons-material/AdminPanelSettings';
 
 function Header() {
   const pathname = usePathname();
@@ -46,6 +47,15 @@ function Header() {
             variant={isActive('/stats') ? 'outlined' : 'text'}
           >
             Stats
+          </Button>
+          <Button 
+            color="inherit" 
+            component={Link} 
+            href="/admin"
+            startIcon={<AdminPanelSettingsIcon />}
+            variant={isActive('/admin') ? 'outlined' : 'text'}
+          >
+            Admin
           </Button>
         </Box>
       </Toolbar>
