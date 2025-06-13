@@ -92,4 +92,8 @@ coverage.xml
 thumbnails/
 processed/
 
+# Data directories (contains persistent data)
+nas-search-data/
+volume-backup-*/
+
 test-data
