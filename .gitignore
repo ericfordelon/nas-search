@@ -91,3 +91,5 @@ coverage.xml
 # Thumbnails and processed files
 thumbnails/
 processed/
+
+test-data
