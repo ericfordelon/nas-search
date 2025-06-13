@@ -355,15 +355,10 @@ class MetadataExtractorService:
             # Combine with file message data
             document = {**message, **metadata}
             
-            # Create deterministic document ID: hash of file_path + content_hash + file_size
-            # This ensures absolute uniqueness and prevents any duplicates at Solr level
+            # Create deterministic document ID based solely on file_path
+            # This ensures the same file always gets the same ID, allowing updates to overwrite
             import hashlib
-            id_components = [
-                str(file_path),
-                str(document.get('content_hash', '')),
-                str(document.get('file_size', 0))
-            ]
-            deterministic_id = hashlib.sha256('|'.join(id_components).encode()).hexdigest()
+            deterministic_id = hashlib.sha256(str(file_path).encode()).hexdigest()
             document['id'] = deterministic_id
             document['processing_status'] = 'completed'
             
