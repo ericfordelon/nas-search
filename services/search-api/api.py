@@ -176,6 +176,27 @@ async def search(request: Request):
         if 'q' not in final_params:
             final_params['q'] = '*:*'
         
+        # Convert direct field parameters to filter queries
+        filter_fields = [
+            'file_type', 'content_type', 'camera_make', 'camera_model', 
+            'author', 'artist', 'genre', 'directory_path'
+        ]
+        
+        # Handle fq parameters - escape special characters for Solr
+        fq_params = final_params.get('fq', [])
+        if isinstance(fq_params, str):
+            fq_params = [fq_params]
+        elif not isinstance(fq_params, list):
+            fq_params = []
+        
+        # Process fq parameters to escape forward slashes
+        if fq_params:
+            escaped_fq = []
+            for fq in fq_params:
+                # Escape forward slashes in field values
+                escaped_fq.append(fq.replace('/', '\\/'))
+            final_params['fq'] = escaped_fq
+        
         # Make request to Solr
         response = requests.get(f"{SOLR_URL}/select", params=final_params)
         response.raise_for_status()
@@ -237,10 +258,10 @@ async def search(request: Request):
                 setattr(facets, field_name, facet_list)
         
         return SearchResponse(
-            query=q,
+            query=final_params['q'],
             total=solr_data['response']['numFound'],
-            start=start,
-            rows=rows,
+            start=int(final_params.get('start', 0)),
+            rows=int(final_params.get('rows', 10)),
             docs=docs,
             facets=facets,
             query_time=solr_data['responseHeader']['QTime']
@@ -285,6 +306,42 @@ async def search_debug(request: Request):
         # Set default query if not provided
         if 'q' not in final_params:
             final_params['q'] = '*:*'
+        
+        # Convert direct field parameters to filter queries (same as main search)
+        filter_fields = [
+            'file_type', 'content_type', 'camera_make', 'camera_model', 
+            'author', 'artist', 'genre', 'directory_path'
+        ]
+        
+        # Collect existing fq parameters
+        fq_params = final_params.get('fq', [])
+        if isinstance(fq_params, str):
+            fq_params = [fq_params]
+        elif not isinstance(fq_params, list):
+            fq_params = []
+        
+        # Convert direct field parameters to fq (collect fields to remove)
+        fields_to_remove = []
+        for field in filter_fields:
+            if field in final_params:
+                field_value = final_params[field]
+                if field_value and field_value != '':
+                    # Escape special characters in field values for Solr
+                    # Forward slashes need to be escaped
+                    field_value = field_value.replace('/', '\\/')
+                    # Handle other special characters by quoting
+                    if any(char in field_value for char in [' ', ':', '+', '-', '&&', '||', '!', '(', ')', '{', '}', '[', ']', '^', '"', '~', '*', '?']):
+                        field_value = f'"{field_value}"'
+                    fq_params.append(f'{field}:{field_value}')
+                    fields_to_remove.append(field)
+        
+        # Remove direct field parameters after iteration
+        for field in fields_to_remove:
+            del final_params[field]
+        
+        # Update fq in final params
+        if fq_params:
+            final_params['fq'] = fq_params
         
         # Make request to Solr
         response = requests.get(f"{SOLR_URL}/select", params=final_params)
