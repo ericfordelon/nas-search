@@ -73,13 +73,13 @@ services:
       - redis
     restart: unless-stopped
 
-  search-api:
+  nas-search-app:
     build:
-      context: ./services/search-api
+      context: ./nas-search-app
       dockerfile: Dockerfile
-    container_name: nas-search-api
+    container_name: nas-search-app
     ports:
-      - "8080:8080"
+      - "3000:3000"
     volumes:
       - thumbnail_data:/app/thumbnails  # Access to thumbnail storage
     environment:
@@ -89,19 +89,6 @@ services:
     depends_on:
       - solr
       - redis
-    restart: unless-stopped
-
-  web-frontend:
-    build:
-      context: ./services/web-frontend
-      dockerfile: Dockerfile
-    container_name: nas-search-frontend
-    ports:
-      - "3000:3000"
-    environment:
-      - REACT_APP_API_URL=http://localhost:8080
-    depends_on:
-      - search-api
     restart: unless-stopped
 
 volumes:
