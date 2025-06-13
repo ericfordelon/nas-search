@@ -10,7 +10,7 @@ from pathlib import Path
 
 def test_pipeline():
     # Connect to Redis
-    r = redis.from_url('redis://localhost:6379', decode_responses=True)
+    r = redis.from_url('redis://redis:6379', decode_responses=True)
     
     # Test file
     test_file = Path('test-data/sample-document.txt')
@@ -49,7 +49,7 @@ def test_pipeline():
     }
     
     response = requests.post(
-        'http://localhost:8983/solr/nas_content/update?commit=true',
+        'http://solr:8983/solr/nas_content/update?commit=true',
         json=[solr_doc],
         headers={'Content-Type': 'application/json'}
     )
@@ -61,7 +61,7 @@ def test_pipeline():
     
     # Test search
     search_response = requests.get(
-        'http://localhost:8983/solr/nas_content/select?q=test&wt=json&indent=true'
+        'http://solr:8983/solr/nas_content/select?q=test&wt=json&indent=true'
     )
     
     if search_response.status_code == 200:

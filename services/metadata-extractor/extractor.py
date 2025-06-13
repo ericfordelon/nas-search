@@ -309,8 +309,8 @@ class MetadataExtractorService:
     """Main metadata extraction service"""
     
     def __init__(self):
-        self.redis_url = os.getenv('REDIS_URL', 'redis://localhost:6379')
-        self.solr_url = os.getenv('SOLR_URL', 'http://localhost:8983/solr/nas_content')
+        self.redis_url = os.getenv('REDIS_URL', 'redis://redis:6379')
+        self.solr_url = os.getenv('SOLR_URL', 'http://solr:8983/solr/nas_content')
         self.processing_queue = 'file_processing_queue'
         self.thumbnail_queue = 'thumbnail_generation_queue'
         self.redis_client = None

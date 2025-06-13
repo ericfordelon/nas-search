@@ -38,8 +38,8 @@ structlog.configure(
 logger = structlog.get_logger()
 
 # Configuration
-SOLR_URL = os.getenv('SOLR_URL', 'http://localhost:8983/solr/nas_content')
-REDIS_URL = os.getenv('REDIS_URL', 'redis://localhost:6379')
+SOLR_URL = os.getenv('SOLR_URL', 'http://solr:8983/solr/nas_content')
+REDIS_URL = os.getenv('REDIS_URL', 'redis://redis:6379')
 THUMBNAIL_DIR = os.getenv('THUMBNAIL_DIR', '/app/thumbnails')
 
 # Initialize Redis connection

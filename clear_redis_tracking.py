@@ -74,8 +74,8 @@ def clear_redis_tracking(redis_url):
 
 def main():
     parser = argparse.ArgumentParser(description='Clear Redis tracking data for NAS search system')
-    parser.add_argument('--redis-url', default='redis://localhost:6379',
-                       help='Redis URL (default: redis://localhost:6379)')
+    parser.add_argument('--redis-url', default='redis://redis:6379',
+                       help='Redis URL (default: redis://redis:6379)')
     
     args = parser.parse_args()
     

@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 
-const SOLR_URL = process.env.SOLR_URL || 'http://localhost:8983/solr/nas_content';
+const SOLR_URL = process.env.SOLR_URL || 'http://solr:8983/solr/nas_content';
 
 export async function GET() {
   try {

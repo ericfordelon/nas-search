@@ -232,7 +232,7 @@ class ThumbnailGeneratorService:
     """Main thumbnail generation service"""
     
     def __init__(self):
-        self.redis_url = os.getenv('REDIS_URL', 'redis://localhost:6379')
+        self.redis_url = os.getenv('REDIS_URL', 'redis://redis:6379')
         self.thumbnail_dir = os.getenv('THUMBNAIL_DIR', '/app/thumbnails')
         self.quality = int(os.getenv('THUMBNAIL_QUALITY', '85'))
         self.thumbnail_queue = 'thumbnail_generation_queue'

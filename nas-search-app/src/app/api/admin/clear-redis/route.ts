@@ -5,7 +5,7 @@ export async function POST() {
   let client = null;
   
   try {
-    const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
+    const redisUrl = process.env.REDIS_URL || 'redis://redis:6379';
     
     // Create Redis client
     client = createClient({

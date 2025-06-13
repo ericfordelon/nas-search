@@ -52,7 +52,12 @@ function formatBytes(bytes: number): string {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
 }
 
-async function getSystemDiskUsage(dataPath: string): Promise<any> {
+async function getSystemDiskUsage(dataPath: string): Promise<{
+  total: string;
+  used: string;
+  available: string;
+  percentage: number;
+}> {
   try {
     // Get filesystem usage for the data directory
     const { stdout } = await execAsync(`df -h "${dataPath}" | tail -1`);
@@ -96,7 +101,6 @@ export async function GET() {
     // Define subdirectories to monitor
     const subdirectories = ['solr', 'redis', 'thumbnails', 'logs', 'config'];
     const breakdown: DiskUsage[] = [];
-    let totalBytes = 0;
     let totalFiles = 0;
 
     // Get usage for each subdirectory
@@ -115,7 +119,6 @@ export async function GET() {
           lastUpdated: new Date().toISOString()
         });
         
-        totalBytes += bytes;
         totalFiles += files;
       } catch {
         // Directory doesn't exist, add with 0 usage

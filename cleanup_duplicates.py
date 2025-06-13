@@ -120,8 +120,8 @@ def delete_documents(solr_url, doc_ids, dry_run=True):
 
 def main():
     parser = argparse.ArgumentParser(description='Clean up duplicate documents in Solr')
-    parser.add_argument('--solr-url', default='http://localhost:8983/solr/nas_content',
-                       help='Solr URL (default: http://localhost:8983/solr/nas_content)')
+    parser.add_argument('--solr-url', default='http://solr:8983/solr/nas_content',
+                       help='Solr URL (default: http://solr:8983/solr/nas_content)')
     parser.add_argument('--execute', action='store_true',
                        help='Actually delete duplicates (default is dry run)')
     

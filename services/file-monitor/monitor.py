@@ -356,7 +356,7 @@ class FileMonitorService:
     """Main file monitoring service"""
     
     def __init__(self):
-        self.redis_url = os.getenv('REDIS_URL', 'redis://localhost:6379')
+        self.redis_url = os.getenv('REDIS_URL', 'redis://redis:6379')
         self.mount_paths = os.getenv('MOUNT_PATHS', '/nas/test-data')
         self.redis_client = None
         self.observer = None
