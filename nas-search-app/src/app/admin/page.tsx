@@ -46,8 +46,11 @@ interface AdminResponse {
   error?: string;
   stats?: IndexStats;
   instructions?: string[];
+  details?: string[];
   clearedData?: string[];
   keysCleared?: number;
+  restartOutput?: string;
+  fallbackInstructions?: string[];
 }
 
 export default function AdminPage() {
@@ -116,12 +119,19 @@ export default function AdminPage() {
       const data: AdminResponse = await response.json();
       
       if (data.success) {
+        const details = data.details ? '\n\n' + data.details.join('\n') : 
+                        data.instructions ? '\n\n' + data.instructions.join('\n') : '';
+        const output = data.restartOutput ? '\n\nRestart Output:\n' + data.restartOutput : '';
         setMessage({ 
           type: 'success', 
-          text: data.message + (data.instructions ? '\n\n' + data.instructions.join('\n') : '')
+          text: data.message + details + output
         });
       } else {
-        setMessage({ type: 'error', text: data.message || 'Failed to trigger reindexing' });
+        const fallback = data.fallbackInstructions ? '\n\n' + data.fallbackInstructions.join('\n') : '';
+        setMessage({ 
+          type: 'error', 
+          text: (data.message || 'Failed to trigger reindexing') + fallback
+        });
       }
     } catch {
       setMessage({ type: 'error', text: 'Failed to trigger reindexing' });
@@ -341,7 +351,7 @@ export default function AdminPage() {
               <Divider sx={{ my: 2 }} />
               
               <Typography variant="body2" color="text.secondary">
-                <strong>Reindex:</strong> Triggers the file monitor to scan all files and rebuild the index.<br/><br/>
+                <strong>Reindex:</strong> Automatically restarts services to scan all files and rebuild the index.<br/><br/>
                 <strong>Clear Index:</strong> Removes all documents from the search index. Use with caution!<br/><br/>
                 <strong>Clear Redis Data:</strong> Clears tracking data to allow complete reindexing of all files.
               </Typography>
@@ -379,8 +389,8 @@ export default function AdminPage() {
         <DialogTitle>Reindex All Files</DialogTitle>
         <DialogContent>
           <DialogContentText>
-            This will trigger the file monitor service to scan all files in the NAS directory 
-            and rebuild the search index. 
+            This will automatically restart the file monitor and metadata extractor services
+            to scan all files in the NAS directory and rebuild the search index.
             <br /><br />
             Depending on the number of files, this process may take several minutes to complete.
             The system will remain accessible during reindexing.

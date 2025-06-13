@@ -1,34 +1,63 @@
 import { NextResponse } from 'next/server';
+import { exec } from 'child_process';
+import { promisify } from 'util';
+
+const execAsync = promisify(exec);
 
 export async function POST() {
   try {
+    console.log('Starting automatic service restart for reindexing...');
     
-    // In a full implementation, we would:
-    // 1. Connect to Redis
-    // 2. Clear processed files tracking
-    // 3. Send a message to trigger file-monitor to rescan
+    // Change to the project root directory and restart services
+    const projectRoot = process.env.PROJECT_ROOT || '/Users/eric/git/nas-search';
+    const command = `cd "${projectRoot}" && docker-compose restart file-monitor metadata-extractor`;
     
-    // For now, we'll return a message indicating reindexing has been triggered
-    // The file-monitor service should be restarted or sent a signal to rescan
+    console.log(`Executing: ${command}`);
+    
+    const { stdout, stderr } = await execAsync(command);
+    
+    console.log('Docker restart stdout:', stdout);
+    if (stderr) {
+      console.log('Docker restart stderr:', stderr);
+    }
+    
+    // Check if the restart was successful
+    if (stderr && stderr.includes('Error') || stderr.includes('error')) {
+      throw new Error(`Docker restart failed: ${stderr}`);
+    }
     
     return NextResponse.json({
       success: true,
-      message: 'Reindexing triggered. The file monitor service will begin scanning for files.',
-      instructions: [
-        'The file monitor service has been notified to start reindexing',
-        'All files in the NAS path will be processed',
+      message: 'Services restarted successfully. Reindexing has begun automatically.',
+      details: [
+        'File monitor and metadata extractor services have been restarted',
+        'All files in the NAS path will be scanned and reindexed',
         'This operation may take several minutes depending on the number of files',
-        'Check the service logs for progress updates'
+        'Files will be processed with the latest deduplication mechanisms',
+        'Check the service logs for progress updates: docker-compose logs -f file-monitor'
       ],
+      restartOutput: stdout,
       timestamp: new Date().toISOString(),
     });
   } catch (error) {
     console.error('Error triggering reindex:', error);
+    
+    // Provide fallback instructions if automatic restart fails
+    const fallbackInstructions = [
+      'Automatic service restart failed. Please manually restart the services:',
+      'cd /Users/eric/git/nas-search',
+      'docker-compose restart file-monitor metadata-extractor',
+      '',
+      'After manual restart, reindexing will begin automatically.'
+    ];
+    
     return NextResponse.json(
       {
         success: false,
-        message: 'Failed to trigger reindexing',
+        message: 'Failed to automatically restart services',
         error: error instanceof Error ? error.message : 'Unknown error',
+        fallbackInstructions,
+        timestamp: new Date().toISOString(),
       },
       { status: 500 }
     );
