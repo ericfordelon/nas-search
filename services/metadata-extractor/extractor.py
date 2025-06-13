@@ -96,7 +96,16 @@ class MetadataExtractor:
                     metadata['shutter_speed'] = str(tags['EXIF ExposureTime'])
                 
                 if 'EXIF Flash' in tags:
-                    metadata['flash'] = int(str(tags['EXIF Flash'])) > 0
+                    try:
+                        flash_value = str(tags['EXIF Flash'])
+                        # Try to parse as integer, fallback to detecting keywords
+                        try:
+                            metadata['flash'] = int(flash_value) > 0
+                        except ValueError:
+                            # Parse text descriptions like "Flash did not fire"
+                            metadata['flash'] = 'fire' in flash_value.lower()
+                    except:
+                        metadata['flash'] = False
                 
                 # GPS data
                 if 'GPS GPSLatitude' in tags and 'GPS GPSLongitude' in tags:
@@ -237,6 +246,29 @@ class MetadataExtractor:
                     return str(value)
         return None
     
+    def extract_text_content(self, file_path: Path) -> Dict[str, Any]:
+        """Extract text content from text files and documents"""
+        metadata = {}
+        
+        try:
+            file_extension = file_path.suffix.lower()
+            
+            if file_extension == '.txt':
+                # Read plain text files directly
+                with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                    content = f.read()
+                    metadata['content'] = content[:10000]  # Limit to 10KB for indexing
+                    metadata['character_count'] = len(content)
+            elif file_extension in ['.pdf', '.doc', '.docx', '.rtf', '.odt']:
+                # Use Apache Tika for document extraction (would need Tika server)
+                # For now, just detect the document type
+                metadata['document_type'] = file_extension[1:]
+                
+        except Exception as e:
+            logger.error("Failed to extract text content", file_path=str(file_path), error=str(e))
+        
+        return metadata
+    
     def extract_metadata(self, file_path: Path) -> Dict[str, Any]:
         """Extract metadata based on file type"""
         metadata = {}
@@ -253,6 +285,8 @@ class MetadataExtractor:
                 metadata.update(self.extract_video_metadata(file_path))
             elif mime_type.startswith('audio/'):
                 metadata.update(self.extract_audio_metadata(file_path))
+            elif mime_type.startswith('text/') or file_path.suffix.lower() in ['.txt', '.pdf', '.doc', '.docx', '.rtf', '.odt']:
+                metadata.update(self.extract_text_content(file_path))
             
         except Exception as e:
             logger.error("Failed to extract metadata", file_path=str(file_path), error=str(e))

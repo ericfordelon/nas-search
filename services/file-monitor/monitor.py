@@ -209,6 +209,35 @@ class FileMonitorService:
             logger.error("Failed to connect to Redis", error=str(e))
             raise
     
+    def scan_existing_files(self, event_handler):
+        """Scan existing files on startup"""
+        logger.info("Starting initial file scan", nas_path=self.nas_path)
+        
+        nas_path = Path(self.nas_path)
+        total_files = 0
+        processed_files = 0
+        
+        try:
+            for file_path in nas_path.rglob('*'):
+                if file_path.is_file():
+                    total_files += 1
+                    
+                    # Check if file is supported and not already processed
+                    if event_handler._is_supported_file(file_path):
+                        file_str = str(file_path)
+                        
+                        # Check if already processed
+                        if file_str not in event_handler.processed_files:
+                            event_handler._queue_file_for_processing(file_path, 'created')
+                            processed_files += 1
+            
+            logger.info("Initial file scan completed", 
+                       total_files=total_files, 
+                       queued_files=processed_files)
+                       
+        except Exception as e:
+            logger.error("Failed during initial file scan", error=str(e))
+
     def start_monitoring(self):
         """Start filesystem monitoring"""
         if not Path(self.nas_path).exists():
@@ -217,6 +246,9 @@ class FileMonitorService:
         
         # Create event handler
         event_handler = NASFileHandler(self.redis_client, self.nas_path)
+        
+        # Perform initial scan of existing files
+        self.scan_existing_files(event_handler)
         
         # Set up observer
         self.observer = Observer()
