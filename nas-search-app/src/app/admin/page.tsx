@@ -40,11 +40,33 @@ interface IndexStats {
   lastUpdated: string;
 }
 
+interface DiskUsage {
+  directory: string;
+  sizeBytes: number;
+  sizeHuman: string;
+  files: number;
+  lastUpdated: string;
+}
+
+interface DiskStats {
+  totalUsage: DiskUsage;
+  breakdown: DiskUsage[];
+  warnings: string[];
+  available: {
+    total: string;
+    used: string;
+    available: string;
+    percentage: number;
+  };
+}
+
 interface AdminResponse {
   success: boolean;
   message: string;
   error?: string;
   stats?: IndexStats;
+  diskStats?: DiskStats;
+  dataDirectory?: string;
   instructions?: string[];
   details?: string[];
   clearedData?: string[];
@@ -55,8 +77,10 @@ interface AdminResponse {
 
 export default function AdminPage() {
   const [stats, setStats] = useState<IndexStats | null>(null);
+  const [diskStats, setDiskStats] = useState<DiskStats | null>(null);
   const [loading, setLoading] = useState(false);
   const [statsLoading, setStatsLoading] = useState(true);
+  const [diskLoading, setDiskLoading] = useState(true);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [clearDialogOpen, setClearDialogOpen] = useState(false);
   const [reindexDialogOpen, setReindexDialogOpen] = useState(false);
@@ -80,8 +104,27 @@ export default function AdminPage() {
     }
   };
 
+  const loadDiskUsage = async () => {
+    setDiskLoading(true);
+    try {
+      const response = await fetch('/api/admin/disk-usage');
+      const data: AdminResponse = await response.json();
+      
+      if (data.success && data.diskStats) {
+        setDiskStats(data.diskStats);
+      } else {
+        setMessage({ type: 'error', text: data.message || 'Failed to load disk usage' });
+      }
+    } catch {
+      setMessage({ type: 'error', text: 'Failed to load disk usage statistics' });
+    } finally {
+      setDiskLoading(false);
+    }
+  };
+
   useEffect(() => {
     loadStats();
+    loadDiskUsage();
   }, []);
 
   const handleClearIndex = async () => {
@@ -355,6 +398,150 @@ export default function AdminPage() {
                 <strong>Clear Index:</strong> Removes all documents from the search index. Use with caution!<br/><br/>
                 <strong>Clear Redis Data:</strong> Clears tracking data to allow complete reindexing of all files.
               </Typography>
+            </CardContent>
+          </Card>
+        </Grid>
+      </Grid>
+
+      {/* Disk Usage Statistics */}
+      <Grid container spacing={3} sx={{ mt: 2 }}>
+        <Grid size={{ xs: 12 }}>
+          <Card>
+            <CardContent>
+              <Typography variant="h6" gutterBottom>
+                📊 Disk Usage Statistics
+              </Typography>
+              
+              {diskLoading ? (
+                <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
+                  <CircularProgress />
+                </Box>
+              ) : diskStats ? (
+                <Box>
+                  {/* Warnings */}
+                  {diskStats.warnings.length > 0 && (
+                    <Box sx={{ mb: 3 }}>
+                      {diskStats.warnings.map((warning, index) => (
+                        <Alert 
+                          key={index} 
+                          severity={warning.includes('Critical') ? 'error' : 'warning'}
+                          sx={{ mb: 1 }}
+                        >
+                          {warning}
+                        </Alert>
+                      ))}
+                    </Box>
+                  )}
+
+                  {/* System Overview */}
+                  <Grid container spacing={3} sx={{ mb: 3 }}>
+                    <Grid size={{ xs: 12, sm: 6, md: 3 }}>
+                      <Paper sx={{ p: 2, textAlign: 'center' }}>
+                        <Typography variant="h4" color="primary">
+                          {diskStats.totalUsage.sizeHuman}
+                        </Typography>
+                        <Typography variant="body2" color="text.secondary">
+                          Data Directory Size
+                        </Typography>
+                      </Paper>
+                    </Grid>
+                    <Grid size={{ xs: 12, sm: 6, md: 3 }}>
+                      <Paper sx={{ p: 2, textAlign: 'center' }}>
+                        <Typography variant="h4" color="primary">
+                          {diskStats.totalUsage.files.toLocaleString()}
+                        </Typography>
+                        <Typography variant="body2" color="text.secondary">
+                          Total Files
+                        </Typography>
+                      </Paper>
+                    </Grid>
+                    <Grid size={{ xs: 12, sm: 6, md: 3 }}>
+                      <Paper sx={{ p: 2, textAlign: 'center' }}>
+                        <Typography variant="h4" color="primary">
+                          {diskStats.available.used}
+                        </Typography>
+                        <Typography variant="body2" color="text.secondary">
+                          Disk Used
+                        </Typography>
+                      </Paper>
+                    </Grid>
+                    <Grid size={{ xs: 12, sm: 6, md: 3 }}>
+                      <Paper sx={{ p: 2, textAlign: 'center' }}>
+                        <Typography 
+                          variant="h4" 
+                          color={diskStats.available.percentage > 80 ? 'error' : 'primary'}
+                        >
+                          {diskStats.available.percentage}%
+                        </Typography>
+                        <Typography variant="body2" color="text.secondary">
+                          Disk Usage
+                        </Typography>
+                      </Paper>
+                    </Grid>
+                  </Grid>
+
+                  {/* Directory Breakdown */}
+                  <Typography variant="h6" gutterBottom>
+                    Directory Breakdown
+                  </Typography>
+                  
+                  <TableContainer component={Paper} variant="outlined">
+                    <Table size="small">
+                      <TableHead>
+                        <TableRow>
+                          <TableCell>Directory</TableCell>
+                          <TableCell align="right">Size</TableCell>
+                          <TableCell align="right">Files</TableCell>
+                          <TableCell align="right">Percentage</TableCell>
+                        </TableRow>
+                      </TableHead>
+                      <TableBody>
+                        {diskStats.breakdown.map((dir) => (
+                          <TableRow key={dir.directory}>
+                            <TableCell>
+                              <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                                <span style={{ marginRight: 8 }}>
+                                  {dir.directory === 'solr' ? '🔍' :
+                                   dir.directory === 'redis' ? '🗄️' :
+                                   dir.directory === 'thumbnails' ? '🖼️' :
+                                   dir.directory === 'logs' ? '📝' :
+                                   dir.directory === 'config' ? '⚙️' : '📁'}
+                                </span>
+                                <Chip label={dir.directory} size="small" variant="outlined" />
+                              </Box>
+                            </TableCell>
+                            <TableCell align="right">{dir.sizeHuman}</TableCell>
+                            <TableCell align="right">{dir.files.toLocaleString()}</TableCell>
+                            <TableCell align="right">
+                              {diskStats.totalUsage.sizeBytes > 0 
+                                ? ((dir.sizeBytes / diskStats.totalUsage.sizeBytes) * 100).toFixed(1)
+                                : '0.0'}%
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </TableContainer>
+
+                  <Box sx={{ mt: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <Typography variant="body2" color="text.secondary">
+                      Last updated: {new Date(diskStats.totalUsage.lastUpdated).toLocaleString()}
+                    </Typography>
+                    <Button 
+                      variant="outlined" 
+                      size="small"
+                      onClick={loadDiskUsage}
+                      disabled={diskLoading}
+                    >
+                      Refresh
+                    </Button>
+                  </Box>
+                </Box>
+              ) : (
+                <Alert severity="warning">
+                  Failed to load disk usage statistics
+                </Alert>
+              )}
             </CardContent>
           </Card>
         </Grid>

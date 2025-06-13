@@ -5,12 +5,14 @@ services:
     image: solr:9.4
     container_name: nas-search-solr
     ports:
-      - "8983:8983"
+      - "${SOLR_PORT:-8983}:8983"
     volumes:
       - ./solr/configsets:/opt/solr/server/solr/configsets
-      - solr_data:/var/solr
+      - ${NAS_SEARCH_DATA_DIR:-./nas-search-data}/solr:/var/solr
+      - ${NAS_SEARCH_DATA_DIR:-./nas-search-data}/logs:/var/log/solr
     environment:
-      - SOLR_HEAP=2g
+      - SOLR_HEAP=${SOLR_HEAP:-2g}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
     command: >
       bash -c "
         solr-precreate nas_content /opt/solr/server/solr/configsets/nas_content &&
@@ -22,10 +24,11 @@ services:
     image: redis:7-alpine
     container_name: nas-search-redis
     ports:
-      - "6379:6379"
+      - "${REDIS_PORT:-6379}:6379"
     volumes:
-      - redis_data:/data
-    command: redis-server --appendonly yes
+      - ${NAS_SEARCH_DATA_DIR:-./nas-search-data}/redis:/data
+      - ${NAS_SEARCH_DATA_DIR:-./nas-search-data}/logs:/var/log/redis
+    command: redis-server --appendonly ${REDIS_PERSISTENCE:-yes}
     restart: unless-stopped
 
   file-monitor:
@@ -34,10 +37,12 @@ services:
       dockerfile: Dockerfile
     container_name: nas-search-file-monitor
     volumes:
-      - ./test-data:/nas:ro  # Mount test data for testing
+      - ${NAS_PATH:-./test-data}:/nas:ro
+      - ${NAS_SEARCH_DATA_DIR:-./nas-search-data}/logs:/var/log/app
     environment:
-      - REDIS_URL=redis://redis:6379
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379}
       - NAS_PATH=/nas
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
     depends_on:
       - redis
     restart: unless-stopped
@@ -48,10 +53,12 @@ services:
       dockerfile: Dockerfile
     container_name: nas-search-metadata-extractor
     volumes:
-      - ./test-data:/nas:ro  # Mount test data for testing
+      - ${NAS_PATH:-./test-data}:/nas:ro
+      - ${NAS_SEARCH_DATA_DIR:-./nas-search-data}/logs:/var/log/app
     environment:
-      - REDIS_URL=redis://redis:6379
-      - SOLR_URL=http://solr:8983/solr/nas_content
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379}
+      - SOLR_URL=${SOLR_URL:-http://solr:8983/solr/nas_content}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
     depends_on:
       - redis
       - solr
@@ -63,12 +70,14 @@ services:
       dockerfile: Dockerfile
     container_name: nas-search-thumbnail-generator
     volumes:
-      - ./test-data:/nas:ro  # Mount test data for testing
-      - thumbnail_data:/app/thumbnails  # Persistent thumbnail storage
+      - ${NAS_PATH:-./test-data}:/nas:ro
+      - ${NAS_SEARCH_DATA_DIR:-./nas-search-data}/thumbnails:/app/thumbnails
+      - ${NAS_SEARCH_DATA_DIR:-./nas-search-data}/logs:/var/log/app
     environment:
-      - REDIS_URL=redis://redis:6379
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379}
       - THUMBNAIL_DIR=/app/thumbnails
-      - THUMBNAIL_QUALITY=85
+      - THUMBNAIL_QUALITY=${THUMBNAIL_QUALITY:-85}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
     depends_on:
       - redis
     restart: unless-stopped
@@ -79,23 +88,25 @@ services:
       dockerfile: Dockerfile
     container_name: nas-search-app
     ports:
-      - "3000:3000"
+      - "${APP_PORT:-3000}:3000"
     volumes:
-      - thumbnail_data:/app/thumbnails  # Access to thumbnail storage
+      - ${NAS_SEARCH_DATA_DIR:-./nas-search-data}/thumbnails:/app/thumbnails
+      - ${NAS_SEARCH_DATA_DIR:-./nas-search-data}/logs:/var/log/app
     environment:
-      - SOLR_URL=http://solr:8983/solr/nas_content
-      - REDIS_URL=redis://redis:6379
+      - SOLR_URL=${SOLR_URL:-http://solr:8983/solr/nas_content}
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379}
       - THUMBNAIL_DIR=/app/thumbnails
+      - NAS_SEARCH_DATA_DIR=/data
+      - ENABLE_DISK_MONITORING=${ENABLE_DISK_MONITORING:-true}
+      - DISK_WARNING_THRESHOLD=${DISK_WARNING_THRESHOLD:-80}
+      - DISK_CRITICAL_THRESHOLD=${DISK_CRITICAL_THRESHOLD:-90}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
     depends_on:
       - solr
       - redis
     restart: unless-stopped
 
-volumes:
-  solr_data:
-  redis_data:
-  thumbnail_data:
-
+# Remove volume definitions since we're using host mounts
 networks:
   default:
     name: nas-search-network
