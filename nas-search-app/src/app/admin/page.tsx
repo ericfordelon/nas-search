@@ -46,6 +46,8 @@ interface AdminResponse {
   error?: string;
   stats?: IndexStats;
   instructions?: string[];
+  clearedData?: string[];
+  keysCleared?: number;
 }
 
 export default function AdminPage() {
@@ -55,6 +57,7 @@ export default function AdminPage() {
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [clearDialogOpen, setClearDialogOpen] = useState(false);
   const [reindexDialogOpen, setReindexDialogOpen] = useState(false);
+  const [clearRedisDialogOpen, setClearRedisDialogOpen] = useState(false);
 
   const loadStats = async () => {
     setStatsLoading(true);
@@ -125,6 +128,33 @@ export default function AdminPage() {
     } finally {
       setLoading(false);
       setReindexDialogOpen(false);
+    }
+  };
+
+  const handleClearRedis = async () => {
+    setLoading(true);
+    setMessage(null);
+    
+    try {
+      const response = await fetch('/api/admin/clear-redis', {
+        method: 'POST',
+      });
+      const data: AdminResponse = await response.json();
+      
+      if (data.success) {
+        const details = data.clearedData ? '\n\nDetails:\n' + data.clearedData.join('\n') : '';
+        setMessage({ 
+          type: 'success', 
+          text: data.message + details
+        });
+      } else {
+        setMessage({ type: 'error', text: data.message || 'Failed to clear Redis data' });
+      }
+    } catch {
+      setMessage({ type: 'error', text: 'Failed to clear Redis data' });
+    } finally {
+      setLoading(false);
+      setClearRedisDialogOpen(false);
     }
   };
 
@@ -300,14 +330,9 @@ export default function AdminPage() {
                 <Button
                   variant="outlined"
                   color="warning"
-                  onClick={() => {
-                    setMessage({
-                      type: 'success',
-                      text: 'To clear Redis tracking data, run:\npython3 clear_redis_tracking.py --redis-url redis://localhost:6379\n\nThis will allow reindexing of all files.'
-                    });
-                  }}
+                  onClick={() => setClearRedisDialogOpen(true)}
+                  disabled={loading}
                   fullWidth
-                  size="small"
                 >
                   Clear Redis Data
                 </Button>
@@ -317,7 +342,8 @@ export default function AdminPage() {
               
               <Typography variant="body2" color="text.secondary">
                 <strong>Reindex:</strong> Triggers the file monitor to scan all files and rebuild the index.<br/><br/>
-                <strong>Clear Index:</strong> Removes all documents from the search index. Use with caution!
+                <strong>Clear Index:</strong> Removes all documents from the search index. Use with caution!<br/><br/>
+                <strong>Clear Redis Data:</strong> Clears tracking data to allow complete reindexing of all files.
               </Typography>
             </CardContent>
           </Card>
@@ -369,6 +395,34 @@ export default function AdminPage() {
             disabled={loading}
           >
             {loading ? <CircularProgress size={20} /> : 'Start Reindexing'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Clear Redis Confirmation Dialog */}
+      <Dialog open={clearRedisDialogOpen} onClose={() => setClearRedisDialogOpen(false)}>
+        <DialogTitle>Clear Redis Tracking Data</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            This will clear all Redis tracking data including:
+            <br />• Processed files tracking
+            <br />• File content hashes  
+            <br />• Processing locks
+            <br />• Queue states
+            <br /><br />
+            After clearing this data, the file monitor will treat all files as new and reindex them.
+            This is useful for forcing a complete reindex of all content.
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setClearRedisDialogOpen(false)}>Cancel</Button>
+          <Button 
+            onClick={handleClearRedis} 
+            color="warning" 
+            variant="contained"
+            disabled={loading}
+          >
+            {loading ? <CircularProgress size={20} /> : 'Clear Redis Data'}
           </Button>
         </DialogActions>
       </Dialog>
