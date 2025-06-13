@@ -29,9 +29,13 @@ function SearchBar({ onSearch, onFiltersChange, initialQuery = '', initialFilter
     ...initialFilters
   });
 
+  // Sync with parent filters when they change (e.g., from facet clicks)
   useEffect(() => {
-    onFiltersChange(filters);
-  }, [filters, onFiltersChange]);
+    setFilters(prev => ({
+      ...prev,
+      ...initialFilters
+    }));
+  }, [initialFilters]);
 
   const handleSearch = (e) => {
     e?.preventDefault();
@@ -39,21 +43,25 @@ function SearchBar({ onSearch, onFiltersChange, initialQuery = '', initialFilter
   };
 
   const handleFilterChange = (field, value) => {
-    setFilters(prev => ({
-      ...prev,
+    const newFilters = {
+      ...filters,
       [field]: value
-    }));
+    };
+    setFilters(newFilters);
+    onFiltersChange(newFilters);
   };
 
   const clearFilters = () => {
-    setFilters({
+    const clearedFilters = {
       file_type: '',
       content_type: '',
       camera_make: '',
       date_from: '',
       date_to: '',
       sort: 'created_date desc'
-    });
+    };
+    setFilters(clearedFilters);
+    onFiltersChange(clearedFilters);
   };
 
   const activeFilterCount = Object.values(filters).filter(v => v && v !== 'created_date desc').length;

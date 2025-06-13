@@ -278,15 +278,26 @@ class MetadataExtractor:
             mime_type = self.magic.from_file(str(file_path))
             metadata['content_type'] = mime_type
             
-            # Extract type-specific metadata
+            # Derive high-level file type for faceting
             if mime_type.startswith('image/'):
+                metadata['file_type'] = 'image'
                 metadata.update(self.extract_image_metadata(file_path))
             elif mime_type.startswith('video/'):
+                metadata['file_type'] = 'video'
                 metadata.update(self.extract_video_metadata(file_path))
             elif mime_type.startswith('audio/'):
+                metadata['file_type'] = 'audio'
                 metadata.update(self.extract_audio_metadata(file_path))
             elif mime_type.startswith('text/') or file_path.suffix.lower() in ['.txt', '.pdf', '.doc', '.docx', '.rtf', '.odt']:
+                metadata['file_type'] = 'document'
                 metadata.update(self.extract_text_content(file_path))
+            else:
+                # Default file type based on extension
+                ext = file_path.suffix.lower()
+                if ext in ['.zip', '.rar', '.7z', '.tar', '.gz']:
+                    metadata['file_type'] = 'archive'
+                else:
+                    metadata['file_type'] = 'other'
             
         except Exception as e:
             logger.error("Failed to extract metadata", file_path=str(file_path), error=str(e))

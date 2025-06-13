@@ -34,14 +34,21 @@ function SearchPage() {
     setError(null);
     
     try {
+      // Clean up filters - remove empty string values
+      const cleanFilters = Object.fromEntries(
+        Object.entries(filters).filter(([key, value]) => value && value !== '')
+      );
+      
       const params = {
         q: searchQuery || '*:*',
         start: (page - 1) * pageSize,
         rows: pageSize,
-        ...filters
+        ...cleanFilters
       };
 
+      console.log('Performing search with params:', params);
       const response = await searchFiles(params);
+      console.log('Search response - total:', response.total);
       
       setResults(response.docs);
       setFacets(response.facets);
@@ -70,16 +77,22 @@ function SearchPage() {
   };
 
   const handleFacetClick = (facetType, facetValue) => {
+    console.log('Facet clicked:', facetType, '=', facetValue);
+    console.log('Current filters before click:', filters);
+    
     const newFilters = { ...filters };
     
     if (newFilters[facetType] === facetValue) {
       // Remove filter if clicking on already selected facet
+      console.log('Removing filter');
       delete newFilters[facetType];
     } else {
       // Add or update filter
+      console.log('Adding filter');
       newFilters[facetType] = facetValue;
     }
     
+    console.log('New filters after click:', newFilters);
     setFilters(newFilters);
     setCurrentPage(1);
   };
