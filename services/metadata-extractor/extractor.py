@@ -365,7 +365,9 @@ class MetadataExtractorService:
             success = self.index_in_solr(document)
             
             if success:
-                # Mark as processed
+                # Mark as processed with timestamp
+                processed_key = f"processed:{str(file_path)}"
+                self.redis_client.set(processed_key, str(time.time()), ex=86400)  # Expire after 24 hours
                 self.redis_client.sadd('processed_files', str(file_path))
                 self.redis_client.srem('queued_files', str(file_path))
                 
@@ -380,9 +382,67 @@ class MetadataExtractorService:
             logger.error("Failed to process file", message=message, error=str(e))
             return False
     
+    def check_if_update_needed(self, document: Dict[str, Any]) -> bool:
+        """Check if document needs to be updated in Solr"""
+        try:
+            file_path = document.get('file_path')
+            content_hash = document.get('content_hash')
+            modified_date = document.get('modified_date')
+            
+            if not file_path:
+                return True
+            
+            # Query existing document from Solr
+            response = requests.get(
+                f"{self.solr_url}/select",
+                params={
+                    'q': f'id:"{file_path}"',
+                    'fl': 'content_hash,modified_date',
+                    'wt': 'json'
+                }
+            )
+            
+            if response.status_code != 200:
+                logger.warning("Failed to query Solr for existing document", file_path=file_path)
+                return True
+            
+            data = response.json()
+            if data['response']['numFound'] == 0:
+                # Document doesn't exist, needs indexing
+                return True
+            
+            existing_doc = data['response']['docs'][0]
+            existing_hash = existing_doc.get('content_hash')
+            existing_modified = existing_doc.get('modified_date')
+            
+            # Skip if content hash matches (file hasn't changed)
+            if content_hash and existing_hash == content_hash:
+                logger.info("Skipping indexing - content unchanged", 
+                           file_path=file_path, hash=content_hash)
+                return False
+            
+            # Skip if modification date is the same or older
+            if modified_date and existing_modified and modified_date <= existing_modified:
+                logger.info("Skipping indexing - file not newer", 
+                           file_path=file_path, 
+                           existing_modified=existing_modified,
+                           new_modified=modified_date)
+                return False
+            
+            return True
+            
+        except Exception as e:
+            logger.warning("Error checking if update needed, proceeding with indexing", 
+                          file_path=document.get('file_path'), error=str(e))
+            return True
+
     def index_in_solr(self, document: Dict[str, Any]) -> bool:
         """Index document in Solr"""
         try:
+            # Check if update is actually needed
+            if not self.check_if_update_needed(document):
+                return True  # Return success since document is already up to date
+            
             # Fields that should not be sent to Solr (not in our schema)
             excluded_fields = {'event_type', 'queued_at', 'format'}
             

@@ -112,28 +112,57 @@ class NASFileHandler(FileSystemEventHandler):
             return {}
     
     def _queue_file_for_processing(self, file_path: Path, event_type: str):
-        """Add file to processing queue"""
+        """Add file to processing queue with proper deduplication"""
         try:
-            # Skip if already processed (for created/modified events)
-            file_key = f"{file_path}:{event_type}"
-            if event_type in ['created', 'modified'] and file_key in self.processed_files:
+            file_str = str(file_path)
+            
+            # Use Redis to atomically check and prevent duplicate queuing
+            queue_key = f"queue_lock:{file_str}"
+            
+            # Try to acquire a processing lock (expires in 5 minutes)
+            if not self.redis_client.set(queue_key, "processing", nx=True, ex=300):
+                logger.debug("File already queued or processing", file_path=file_str)
                 return
             
-            message = self._create_file_message(file_path, event_type)
-            if not message:
-                return
-            
-            # Add to Redis queue
-            self.redis_client.lpush(self.processing_queue, json.dumps(message))
-            
-            # Mark as queued
-            if event_type != 'deleted':
-                self.redis_client.sadd('queued_files', str(file_path))
-            
-            logger.info("File queued for processing", 
-                       file_path=str(file_path), 
-                       event_type=event_type,
-                       file_size=message.get('file_size', 0))
+            try:
+                # Skip if already in queue
+                if self.redis_client.sismember('queued_files', file_str):
+                    logger.debug("File already in queue", file_path=file_str)
+                    return
+                
+                # Skip if recently processed (for created/modified events)
+                if event_type in ['created', 'modified']:
+                    processed_key = f"processed:{file_str}"
+                    last_processed = self.redis_client.get(processed_key)
+                    if last_processed:
+                        # Check if file was processed recently (within last hour)
+                        try:
+                            last_time = float(last_processed)
+                            if time.time() - last_time < 3600:  # 1 hour
+                                logger.debug("File processed recently, skipping", file_path=file_str)
+                                return
+                        except (ValueError, TypeError):
+                            pass
+                
+                message = self._create_file_message(file_path, event_type)
+                if not message:
+                    return
+                
+                # Add to Redis queue
+                self.redis_client.lpush(self.processing_queue, json.dumps(message))
+                
+                # Mark as queued
+                if event_type != 'deleted':
+                    self.redis_client.sadd('queued_files', file_str)
+                
+                logger.info("File queued for processing", 
+                           file_path=file_str, 
+                           event_type=event_type,
+                           file_size=message.get('file_size', 0))
+                           
+            finally:
+                # Release the lock
+                self.redis_client.delete(queue_key)
             
         except Exception as e:
             logger.error("Failed to queue file", file_path=str(file_path), error=str(e))
@@ -264,8 +293,8 @@ class FileMonitorService:
                 time.sleep(1)
                 scan_counter += 1
                 
-                # Perform periodic rescan every 5 minutes (300 seconds)
-                if scan_counter % 300 == 0:
+                # Perform periodic rescan every 30 minutes (1800 seconds) to reduce duplicate processing
+                if scan_counter % 1800 == 0:
                     logger.info("Performing periodic rescan for missed files")
                     self.scan_existing_files(event_handler)
                     
