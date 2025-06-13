@@ -259,8 +259,16 @@ class FileMonitorService:
         logger.info("Started file monitoring", nas_path=self.nas_path)
         
         try:
+            scan_counter = 0
             while True:
                 time.sleep(1)
+                scan_counter += 1
+                
+                # Perform periodic rescan every 5 minutes (300 seconds)
+                if scan_counter % 300 == 0:
+                    logger.info("Performing periodic rescan for missed files")
+                    self.scan_existing_files(event_handler)
+                    
         except KeyboardInterrupt:
             logger.info("Shutting down file monitor")
             self.observer.stop()
