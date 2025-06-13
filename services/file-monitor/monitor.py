@@ -55,11 +55,13 @@ class NASFileHandler(FileSystemEventHandler):
         '.zip', '.rar', '.7z', '.tar', '.gz'
     }
     
-    def __init__(self, redis_client: redis.Redis, nas_path: str):
+    def __init__(self, redis_client: redis.Redis, mount_paths: str):
         self.redis_client = redis_client
-        self.nas_path = Path(nas_path)
         self.processing_queue = 'file_processing_queue'
         self.processed_files: Set[str] = set()
+        
+        # Parse multiple mount paths
+        self.mount_points = self._parse_mount_paths(mount_paths)
         
         # Event debouncing: track recent events to prevent duplicates
         self.pending_events: Dict[str, Dict] = {}  # file_path -> event_data
@@ -68,6 +70,38 @@ class NASFileHandler(FileSystemEventHandler):
         
         # Load processed files from Redis on startup
         self._load_processed_files()
+        
+    def _parse_mount_paths(self, mount_paths: str) -> Dict[str, Path]:
+        """Parse MOUNT_PATHS environment variable into volume name -> path mapping"""
+        mount_points = {}
+        
+        # mount_paths format: "/nas/test-data,/nas/photos,/nas/documents"
+        for mount_path in mount_paths.split(','):
+            mount_path = mount_path.strip()
+            if mount_path:
+                # Extract volume name from path like "/nas/test-data" -> "test-data"
+                volume_name = mount_path.split('/')[-1]
+                mount_points[volume_name] = Path(mount_path)
+                logger.info("Configured mount point", volume=volume_name, path=mount_path)
+        
+        return mount_points
+    
+    def _get_standardized_path(self, file_path: Path) -> str:
+        """Convert container file path to standardized index path"""
+        # Find which mount point this file belongs to
+        for volume_name, mount_point in self.mount_points.items():
+            try:
+                # Check if file_path is under this mount point
+                relative_path = file_path.relative_to(mount_point)
+                # Return standardized path: /volume_name/relative_path
+                return f"/{volume_name}/{relative_path}"
+            except ValueError:
+                # file_path is not under this mount_point
+                continue
+        
+        # Fallback: return original path if no mount point matches
+        logger.warning("File path not under any configured mount point", file_path=str(file_path))
+        return str(file_path)
         
     def _load_processed_files(self):
         """Load list of already processed files from Redis"""
@@ -100,17 +134,22 @@ class NASFileHandler(FileSystemEventHandler):
             stat = file_path.stat()
             file_hash = self._get_file_hash(file_path) if event_type != 'deleted' else ""
             
+            # Get standardized path for indexing
+            standardized_path = self._get_standardized_path(file_path)
+            standardized_dir = str(Path(standardized_path).parent)
+            
             return {
                 'event_type': event_type,
-                'file_path': str(file_path),
+                'file_path': standardized_path,  # Use standardized path for indexing
+                'container_path': str(file_path),  # Keep original container path for file operations
                 'file_name': file_path.name,
                 'file_size': stat.st_size if event_type != 'deleted' else 0,
                 'file_extension': file_path.suffix.lower(),
                 'content_hash': file_hash,
                 'created_date': datetime.fromtimestamp(stat.st_ctime).isoformat() + 'Z' if event_type != 'deleted' else None,
                 'modified_date': datetime.fromtimestamp(stat.st_mtime).isoformat() + 'Z' if event_type != 'deleted' else None,
-                'directory_path': str(file_path.parent),
-                'directory_depth': len(file_path.relative_to(self.nas_path).parts) - 1,
+                'directory_path': standardized_dir,  # Use standardized directory path
+                'directory_depth': len(Path(standardized_path).parts) - 2,  # Depth from volume root
                 'queued_at': datetime.utcnow().isoformat() + 'Z'
             }
         except Exception as e:
@@ -318,7 +357,7 @@ class FileMonitorService:
     
     def __init__(self):
         self.redis_url = os.getenv('REDIS_URL', 'redis://localhost:6379')
-        self.nas_path = os.getenv('NAS_PATH', '/nas')
+        self.mount_paths = os.getenv('MOUNT_PATHS', '/nas/test-data')
         self.redis_client = None
         self.observer = None
         
@@ -334,25 +373,42 @@ class FileMonitorService:
     
     def scan_existing_files(self, event_handler):
         """Scan existing files on startup"""
-        logger.info("Starting initial file scan", nas_path=self.nas_path)
+        logger.info("Starting initial file scan", mount_paths=self.mount_paths)
         
-        nas_path = Path(self.nas_path)
         total_files = 0
         processed_files = 0
         
         try:
-            for file_path in nas_path.rglob('*'):
-                if file_path.is_file():
-                    total_files += 1
-                    
-                    # Check if file is supported and not already processed
-                    if event_handler._is_supported_file(file_path):
-                        file_str = str(file_path)
+            # Scan all configured mount points
+            for volume_name, mount_path in event_handler.mount_points.items():
+                logger.info("Scanning volume", volume=volume_name, path=str(mount_path))
+                volume_files = 0
+                volume_processed = 0
+                
+                if not mount_path.exists():
+                    logger.warning("Mount path does not exist", volume=volume_name, path=str(mount_path))
+                    continue
+                
+                for file_path in mount_path.rglob('*'):
+                    if file_path.is_file():
+                        total_files += 1
+                        volume_files += 1
                         
-                        # Check if already processed
-                        if file_str not in event_handler.processed_files:
-                            event_handler._queue_file_for_processing(file_path, 'created')
-                            processed_files += 1
+                        # Check if file is supported and not already processed
+                        if event_handler._is_supported_file(file_path):
+                            # Use standardized path for processing check
+                            standardized_path = event_handler._get_standardized_path(file_path)
+                            
+                            # Check if already processed
+                            if standardized_path not in event_handler.processed_files:
+                                event_handler._queue_file_for_processing(file_path, 'created')
+                                processed_files += 1
+                                volume_processed += 1
+                
+                logger.info("Volume scan completed", 
+                           volume=volume_name,
+                           total_files=volume_files, 
+                           queued_files=volume_processed)
             
             logger.info("Initial file scan completed", 
                        total_files=total_files, 
@@ -363,23 +419,31 @@ class FileMonitorService:
 
     def start_monitoring(self):
         """Start filesystem monitoring"""
-        if not Path(self.nas_path).exists():
-            logger.error("NAS path does not exist", nas_path=self.nas_path)
-            raise FileNotFoundError(f"NAS path {self.nas_path} does not exist")
+        # Create event handler with multiple mount paths
+        event_handler = NASFileHandler(self.redis_client, self.mount_paths)
         
-        # Create event handler
-        event_handler = NASFileHandler(self.redis_client, self.nas_path)
+        # Validate all mount paths exist
+        all_paths_valid = True
+        for volume_name, mount_path in event_handler.mount_points.items():
+            if not mount_path.exists():
+                logger.error("Mount path does not exist", volume=volume_name, path=str(mount_path))
+                all_paths_valid = False
+        
+        if not all_paths_valid:
+            raise FileNotFoundError("One or more mount paths do not exist")
         
         # Perform initial scan of existing files
         self.scan_existing_files(event_handler)
         
-        # Set up observer
+        # Set up observer for each mount point
         self.observer = Observer()
-        self.observer.schedule(event_handler, self.nas_path, recursive=True)
+        for volume_name, mount_path in event_handler.mount_points.items():
+            self.observer.schedule(event_handler, str(mount_path), recursive=True)
+            logger.info("Watching mount point", volume=volume_name, path=str(mount_path))
         
         # Start monitoring
         self.observer.start()
-        logger.info("Started file monitoring", nas_path=self.nas_path)
+        logger.info("Started file monitoring", mount_paths=self.mount_paths)
         
         try:
             scan_counter = 0

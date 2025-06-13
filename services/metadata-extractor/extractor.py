@@ -334,33 +334,41 @@ class MetadataExtractorService:
     def process_file(self, message: Dict[str, Any]) -> bool:
         """Process a single file message"""
         try:
-            file_path = Path(message['file_path'])
+            # Use standardized path for indexing/tracking
+            standardized_path = message['file_path']
+            # Use container path for actual file operations
+            container_path = Path(message.get('container_path', message['file_path']))
             event_type = message['event_type']
             
             if event_type == 'deleted':
-                # Remove from Solr index
-                success = self.delete_from_solr(file_path)
+                # Remove from Solr index using standardized path
+                success = self.delete_from_solr(standardized_path)
                 # Release the global processing lock
-                global_lock_key = f"global_processing:{str(file_path)}"
+                global_lock_key = f"global_processing:{standardized_path}"
                 self.redis_client.delete(global_lock_key)
                 return success
             
-            if not file_path.exists():
-                logger.warning("File no longer exists", file_path=str(file_path))
+            if not container_path.exists():
+                logger.warning("File no longer exists", 
+                             standardized_path=standardized_path, 
+                             container_path=str(container_path))
                 return True
             
-            # Extract metadata
-            metadata = self.extractor.extract_metadata(file_path)
+            # Extract metadata from actual file
+            metadata = self.extractor.extract_metadata(container_path)
             
             # Combine with file message data
             document = {**message, **metadata}
             
-            # Create deterministic document ID based solely on file_path
+            # Create deterministic document ID based on standardized path
             # This ensures the same file always gets the same ID, allowing updates to overwrite
             import hashlib
-            deterministic_id = hashlib.sha256(str(file_path).encode()).hexdigest()
+            deterministic_id = hashlib.sha256(standardized_path.encode()).hexdigest()
             document['id'] = deterministic_id
             document['processing_status'] = 'completed'
+            
+            # Remove container_path from final document (not needed in index)
+            document.pop('container_path', None)
             
             # Fix date formats for Solr (ISO format with Z suffix)
             for date_field in ['created_date', 'modified_date']:
@@ -373,23 +381,25 @@ class MetadataExtractorService:
             success = self.index_in_solr(document)
             
             if success:
-                # Mark as processed with timestamp
-                processed_key = f"processed:{str(file_path)}"
+                # Mark as processed with timestamp using standardized path
+                processed_key = f"processed:{standardized_path}"
                 self.redis_client.set(processed_key, str(time.time()), ex=86400)  # Expire after 24 hours
-                self.redis_client.sadd('processed_files', str(file_path))
-                self.redis_client.srem('queued_files', str(file_path))
+                self.redis_client.sadd('processed_files', standardized_path)
+                self.redis_client.srem('queued_files', standardized_path)
                 
                 # Release the global processing lock
-                global_lock_key = f"global_processing:{str(file_path)}"
+                global_lock_key = f"global_processing:{standardized_path}"
                 self.redis_client.delete(global_lock_key)
                 
                 # Trigger thumbnail generation for supported files
                 self.trigger_thumbnail_generation(message)
                 
-                logger.info("File processed successfully", file_path=str(file_path))
+                logger.info("File processed successfully", 
+                           standardized_path=standardized_path,
+                           container_path=str(container_path))
             else:
                 # Release the global processing lock even on failure
-                global_lock_key = f"global_processing:{str(file_path)}"
+                global_lock_key = f"global_processing:{standardized_path}"
                 self.redis_client.delete(global_lock_key)
             
             return success
@@ -398,9 +408,9 @@ class MetadataExtractorService:
             logger.error("Failed to process file", message=message, error=str(e))
             # Release the global processing lock on exception
             try:
-                file_path = message.get('file_path')
-                if file_path:
-                    global_lock_key = f"global_processing:{file_path}"
+                standardized_path = message.get('file_path')
+                if standardized_path:
+                    global_lock_key = f"global_processing:{standardized_path}"
                     self.redis_client.delete(global_lock_key)
             except:
                 pass
@@ -529,11 +539,13 @@ class MetadataExtractorService:
         except Exception as e:
             logger.error("Failed to trigger thumbnail generation", error=str(e))
     
-    def delete_from_solr(self, file_path: Path) -> bool:
+    def delete_from_solr(self, file_path) -> bool:
         """Delete document from Solr using file_path query"""
         try:
             # Since we now use deterministic IDs, we need to delete by file_path query
-            delete_query = f'file_path:"{str(file_path)}"'
+            # file_path can be either a Path object or string (standardized path)
+            path_str = str(file_path)
+            delete_query = f'file_path:"{path_str}"'
             
             response = requests.post(
                 f"{self.solr_url}/update?commit=true",
@@ -542,7 +554,7 @@ class MetadataExtractorService:
             )
             
             if response.status_code == 200:
-                logger.info("Document deleted from Solr", file_path=str(file_path))
+                logger.info("Document deleted from Solr", file_path=path_str)
                 return True
             else:
                 logger.error("Failed to delete from Solr", 

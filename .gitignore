@@ -96,4 +96,7 @@ processed/
 nas-search-data/
 volume-backup-*/
 
+# Test volume directories
 test-data
+test-photos
+test-documents

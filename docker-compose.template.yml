@@ -37,15 +37,12 @@ services:
       dockerfile: Dockerfile
     container_name: nas-search-file-monitor
     volumes:
-      - ./test-data:/nas/test-data:ro
-      - ./test-photos:/nas/photos:ro
-      - ./test-documents:/nas/documents:ro
+      # VOLUME_MOUNTS_PLACEHOLDER
       - ${NAS_SEARCH_DATA_DIR:-./nas-search-data}/logs:/var/log/app
     environment:
       - REDIS_URL=${REDIS_URL:-redis://redis:6379}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
-      - VOLUME_MOUNTS=test-data:./test-data,photos:./test-photos,documents:./test-documents
-      - MOUNT_PATHS=/nas/test-data,/nas/photos,/nas/documents
+      # VOLUME_ENV_PLACEHOLDER
     depends_on:
       - redis
     restart: unless-stopped
@@ -56,16 +53,13 @@ services:
       dockerfile: Dockerfile
     container_name: nas-search-metadata-extractor
     volumes:
-      - ./test-data:/nas/test-data:ro
-      - ./test-photos:/nas/photos:ro
-      - ./test-documents:/nas/documents:ro
+      # VOLUME_MOUNTS_PLACEHOLDER
       - ${NAS_SEARCH_DATA_DIR:-./nas-search-data}/logs:/var/log/app
     environment:
       - REDIS_URL=${REDIS_URL:-redis://redis:6379}
       - SOLR_URL=${SOLR_URL:-http://solr:8983/solr/nas_content}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
-      - VOLUME_MOUNTS=test-data:./test-data,photos:./test-photos,documents:./test-documents
-      - MOUNT_PATHS=/nas/test-data,/nas/photos,/nas/documents
+      # VOLUME_ENV_PLACEHOLDER
     depends_on:
       - redis
       - solr
@@ -77,9 +71,7 @@ services:
       dockerfile: Dockerfile
     container_name: nas-search-thumbnail-generator
     volumes:
-      - ./test-data:/nas/test-data:ro
-      - ./test-photos:/nas/photos:ro
-      - ./test-documents:/nas/documents:ro
+      # VOLUME_MOUNTS_PLACEHOLDER
       - ${NAS_SEARCH_DATA_DIR:-./nas-search-data}/thumbnails:/app/thumbnails
       - ${NAS_SEARCH_DATA_DIR:-./nas-search-data}/logs:/var/log/app
     environment:
@@ -87,8 +79,7 @@ services:
       - THUMBNAIL_DIR=/app/thumbnails
       - THUMBNAIL_QUALITY=${THUMBNAIL_QUALITY:-85}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
-      - VOLUME_MOUNTS=test-data:./test-data,photos:./test-photos,documents:./test-documents
-      - MOUNT_PATHS=/nas/test-data,/nas/photos,/nas/documents
+      # VOLUME_ENV_PLACEHOLDER
     depends_on:
       - redis
     restart: unless-stopped
