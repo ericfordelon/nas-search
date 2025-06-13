@@ -11,7 +11,7 @@ from pathlib import Path
 import requests
 import structlog
 import redis
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
@@ -134,37 +134,26 @@ async def root():
     return {"message": "NAS Search API", "version": "1.0.0", "status": "healthy"}
 
 @app.get("/search", response_model=SearchResponse)
-async def search(
-    q: str = Query("*:*", description="Search query"),
-    start: int = Query(0, ge=0, description="Starting offset for pagination"),
-    rows: int = Query(10, ge=1, le=100, description="Number of results to return"),
-    sort: Optional[str] = Query(None, description="Sort field and direction (e.g., 'created_date desc')"),
-    fq: Optional[List[str]] = Query(None, description="Filter queries"),
-    file_type: Optional[str] = Query(None, description="Filter by file type"),
-    content_type: Optional[str] = Query(None, description="Filter by content type"),
-    camera_make: Optional[str] = Query(None, description="Filter by camera make"),
-    date_from: Optional[str] = Query(None, description="Filter from date (ISO format)"),
-    date_to: Optional[str] = Query(None, description="Filter to date (ISO format)")
-):
+async def search(request: Request):
     """
-    Search the NAS content index
+    Search the NAS content index - passes all parameters directly to Solr
     
-    - **q**: Search query (supports Solr syntax)
+    Supports all Solr query parameters:
+    - **q**: Search query (supports Solr syntax) 
     - **start**: Pagination offset
     - **rows**: Number of results per page
-    - **sort**: Sort order (e.g., 'created_date desc', 'file_size asc')
-    - **fq**: Additional filter queries
-    - **file_type**: Filter by file type
-    - **content_type**: Filter by MIME type
-    - **camera_make**: Filter by camera manufacturer
-    - **date_from/date_to**: Date range filters
+    - **sort**: Sort order (e.g., 'created_date desc')
+    - **fq**: Filter queries (e.g., 'file_type:image')
+    - **facet**: Enable faceting
+    - **hl**: Enable highlighting
+    - Any other Solr parameters
     """
     try:
-        # Build Solr query parameters
-        params = {
-            'q': q,
-            'start': start,
-            'rows': rows,
+        # Get all query parameters from the request
+        params = dict(request.query_params)
+        
+        # Add default Solr parameters for our use case
+        default_params = {
             'wt': 'json',
             'indent': 'true',
             'facet': 'true',
@@ -180,37 +169,15 @@ async def search(
             'fl': '*,score'
         }
         
-        # Add sort parameter
-        if sort:
-            params['sort'] = sort
+        # Merge defaults with user params (user params take precedence)
+        final_params = {**default_params, **params}
         
-        # Build filter queries
-        filters = []
-        if fq:
-            filters.extend(fq)
-        
-        # Add field-specific filters
-        if file_type:
-            filters.append(f'file_type:"{file_type}"')
-        if content_type:
-            filters.append(f'content_type:"{content_type}"')
-        if camera_make:
-            filters.append(f'camera_make:"{camera_make}"')
-        
-        # Add date range filters
-        if date_from or date_to:
-            date_filter = 'created_date:['
-            date_filter += date_from if date_from else '*'
-            date_filter += ' TO '
-            date_filter += date_to if date_to else '*'
-            date_filter += ']'
-            filters.append(date_filter)
-        
-        if filters:
-            params['fq'] = filters
+        # Set default query if not provided
+        if 'q' not in final_params:
+            final_params['q'] = '*:*'
         
         # Make request to Solr
-        response = requests.get(f"{SOLR_URL}/select", params=params)
+        response = requests.get(f"{SOLR_URL}/select", params=final_params)
         response.raise_for_status()
         
         solr_data = response.json()
@@ -284,6 +251,60 @@ async def search(
         raise HTTPException(status_code=503, detail="Search service unavailable")
     except Exception as e:
         logger.error("Search request failed", error=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@app.get("/search/debug")
+async def search_debug(request: Request):
+    """
+    Debug endpoint that returns raw Solr response with request parameters
+    """
+    try:
+        # Get all query parameters from the request  
+        params = dict(request.query_params)
+        
+        # Add default Solr parameters
+        default_params = {
+            'wt': 'json',
+            'indent': 'true',
+            'facet': 'true',
+            'facet.field': [
+                'file_type', 'content_type', 'camera_make', 
+                'camera_model', 'author', 'artist', 'genre', 'directory_path'
+            ],
+            'facet.mincount': 1,
+            'hl': 'true',
+            'hl.fl': 'content',
+            'hl.simple.pre': '<mark>',
+            'hl.simple.post': '</mark>',
+            'fl': '*,score'
+        }
+        
+        # Merge defaults with user params
+        final_params = {**default_params, **params}
+        
+        # Set default query if not provided
+        if 'q' not in final_params:
+            final_params['q'] = '*:*'
+        
+        # Make request to Solr
+        response = requests.get(f"{SOLR_URL}/select", params=final_params)
+        response.raise_for_status()
+        
+        solr_data = response.json()
+        
+        # Return debug info
+        return {
+            "frontend_params": dict(request.query_params),
+            "solr_params": final_params,
+            "solr_url": f"{SOLR_URL}/select",
+            "solr_response": solr_data
+        }
+        
+    except requests.RequestException as e:
+        logger.error("Solr request failed", error=str(e))
+        raise HTTPException(status_code=503, detail="Search service unavailable")
+    except Exception as e:
+        logger.error("Debug request failed", error=str(e))
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @app.get("/stats", response_model=StatsResponse)

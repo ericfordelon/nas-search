@@ -10,8 +10,13 @@ import {
   InputLabel,
   Select,
   MenuItem,
-  Paper
+  Paper,
+  Accordion,
+  AccordionSummary,
+  AccordionDetails,
+  IconButton
 } from '@mui/material';
+import { ExpandMore, BugReport } from '@mui/icons-material';
 import SearchBar from '../components/SearchBar';
 import ResultCard from '../components/ResultCard';
 import FacetPanel from '../components/FacetPanel';
@@ -28,27 +33,63 @@ function SearchPage() {
   const [currentPage, setCurrentPage] = useState(1);
   const [rowsPerPage, setRowsPerPage] = useState(12);
   const [queryTime, setQueryTime] = useState(0);
+  const [debugData, setDebugData] = useState(null);
+  const [showDebug, setShowDebug] = useState(false);
 
   const performSearch = useCallback(async (searchQuery, page = 1, pageSize = rowsPerPage) => {
     setLoading(true);
     setError(null);
     
     try {
-      // Clean up filters - remove empty string values
-      const cleanFilters = Object.fromEntries(
-        Object.entries(filters).filter(([key, value]) => value && value !== '')
-      );
+      // Build fq (filter query) parameters in Solr format
+      const fqParams = [];
+      Object.entries(filters).forEach(([key, value]) => {
+        if (value && value !== '' && key !== 'sort') {
+          fqParams.push(`${key}:${value}`);
+        }
+      });
       
       const params = {
         q: searchQuery || '*:*',
         start: (page - 1) * pageSize,
         rows: pageSize,
-        ...cleanFilters
       };
+      
+      // Add fq parameters
+      if (fqParams.length > 0) {
+        params.fq = fqParams;
+      }
+      
+      // Add sort if specified
+      if (filters.sort && filters.sort !== '') {
+        params.sort = filters.sort;
+      }
 
       console.log('Performing search with params:', params);
       const response = await searchFiles(params);
       console.log('Search response - total:', response.total);
+      
+      // Also fetch debug data
+      try {
+        const debugParams = new URLSearchParams();
+        Object.entries(params).forEach(([key, value]) => {
+          if (Array.isArray(value)) {
+            value.forEach(v => debugParams.append(key, v));
+          } else {
+            debugParams.append(key, value);
+          }
+        });
+        
+        const debugResponse = await fetch(`/api/search/debug?${debugParams}`);
+        if (debugResponse.ok) {
+          const debugData = await debugResponse.json();
+          setDebugData(debugData);
+        } else {
+          console.warn('Debug endpoint not available');
+        }
+      } catch (e) {
+        console.warn('Failed to fetch debug data:', e);
+      }
       
       setResults(response.docs);
       setFacets(response.facets);
@@ -212,6 +253,51 @@ function SearchPage() {
           )}
         </Grid>
       </Grid>
+
+      {/* Debug Panel */}
+      <Box sx={{ mt: 4 }}>
+        <Accordion expanded={showDebug} onChange={() => setShowDebug(!showDebug)}>
+          <AccordionSummary expandIcon={<ExpandMore />}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <BugReport />
+              <Typography variant="h6">Debug Information</Typography>
+            </Box>
+          </AccordionSummary>
+          <AccordionDetails>
+            {debugData && (
+              <Box sx={{ fontFamily: 'monospace', fontSize: '0.85rem' }}>
+                <Typography variant="subtitle2" gutterBottom>
+                  Frontend Parameters:
+                </Typography>
+                <Paper sx={{ p: 2, mb: 2, bgcolor: 'grey.100' }}>
+                  <pre>{JSON.stringify(debugData.frontend_params, null, 2)}</pre>
+                </Paper>
+                
+                <Typography variant="subtitle2" gutterBottom>
+                  Solr Parameters:
+                </Typography>
+                <Paper sx={{ p: 2, mb: 2, bgcolor: 'grey.100' }}>
+                  <pre>{JSON.stringify(debugData.solr_params, null, 2)}</pre>
+                </Paper>
+                
+                <Typography variant="subtitle2" gutterBottom>
+                  Solr URL:
+                </Typography>
+                <Paper sx={{ p: 2, mb: 2, bgcolor: 'grey.100' }}>
+                  <code>{debugData.solr_url}</code>
+                </Paper>
+                
+                <Typography variant="subtitle2" gutterBottom>
+                  Raw Solr Response:
+                </Typography>
+                <Paper sx={{ p: 2, bgcolor: 'grey.100', maxHeight: 400, overflow: 'auto' }}>
+                  <pre>{JSON.stringify(debugData.solr_response, null, 2)}</pre>
+                </Paper>
+              </Box>
+            )}
+          </AccordionDetails>
+        </Accordion>
+      </Box>
     </Box>
   );
 }
